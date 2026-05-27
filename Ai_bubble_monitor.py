@@ -4,11 +4,31 @@ import pandas as pd
 import numpy as np
 import datetime
 import os
-import json
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
+
+from bubble_monitor.alerts import evaluate_alerts
+from bubble_monitor.data_quality import DataQualityReport
+from bubble_monitor.model_config import (
+    COMMODITIES,
+    EQUIP_STOCKS,
+    FACTOR_METHODOLOGY,
+    FRED_SERIES,
+    GROWTH_COMPONENTS,
+    HYPERSCALERS,
+    INFRA_STOCKS,
+    NETWORK_STOCKS,
+    RISK_CLUSTERS,
+    RISK_LABELS_ZH,
+    TECH_GIANTS,
+    TW_SUPPLY,
+    WEIGHTS,
+)
+from bubble_monitor.notifications import dispatch_alerts, enabled_channels
+from bubble_monitor.scoring import classify_regime, cluster_decomposition, normalize, stress_delta, weighted_stress_score
+from bubble_monitor.storage import HistoryStore
 
 # =============================================================
 # 頁面設定
@@ -264,14 +284,6 @@ def risk_color(score):
 # =============================================================
 # 1. 核心資料抓取
 # =============================================================
-TECH_GIANTS = ['NVDA', 'MSFT', 'META', 'GOOG', 'AMZN']
-TW_SUPPLY = ['TSM', 'UMC', 'ASX']
-INFRA_STOCKS = ['MU', 'VRT']
-EQUIP_STOCKS = ['ASML', 'AMAT', 'LRCX']
-NETWORK_STOCKS = ['AVGO']
-COMMODITIES = ['CL=F', 'GC=F']
-HYPERSCALERS = ['MSFT', 'GOOG', 'AMZN', 'META']
-
 latest_spread = 3.5; latest_curve = -0.5; vxn = 20.0
 avg_ev_ebitda = 30.0; avg_momentum = 0.05; infra_momentum = 0.05; comm_momentum = 0.0
 net_liquidity = 6000.0; tnx_yield = 4.2; dxy = 104.0
@@ -279,6 +291,7 @@ margin_debt = None; put_call_ratio = None
 walcl = 0; tga = 0; rrp = 0
 fed_funds = 5.25; m2_yoy = 0.0; nfci = 0.0; unemployment = 3.7; consumer_sentiment = 65.0
 sox_momentum = 0.0; btc_momentum = 0.0
+data_quality = DataQualityReport()
 
 # [A] FRED 數據
 @st.cache_data(ttl=3600)
@@ -291,24 +304,9 @@ def fetch_fred_series(series_id):
         return None
 
 fred_data = {}
-fred_ids = {
-    'spread': 'BAMLH0A0HYM2',
-    'curve': 'T10Y2Y',
-    'walcl': 'WALCL',
-    'tga': 'WTREGEN',
-    'rrp': 'RRPONTSYD',
-    'margin_debt': 'BOGZ1FL663067003Q',
-    'wilshire': 'WILL5000PR',
-    'gdp': 'GDP',
-    'fedfunds': 'FEDFUNDS',
-    'm2': 'M2SL',
-    'nfci': 'NFCI',
-    'unrate': 'UNRATE',
-    'umcsent': 'UMCSENT',
-}
-
-for key, sid in fred_ids.items():
+for key, sid in FRED_SERIES.items():
     fred_data[key] = fetch_fred_series(sid)
+    data_quality.record_fred_frame(key, sid, fred_data[key])
 
 try:
     latest_spread = float(fred_data['spread'].iloc[-1, 1])
@@ -473,12 +471,15 @@ def get_historical_pe_spy():
 # 抓取即時數據
 vxn_val = get_latest_price('^VXN')
 if vxn_val: vxn = vxn_val
+data_quality.record_value("VXN Volatility", "Yahoo Finance ^VXN", vxn_val, fallback_used=vxn_val is None)
 
 tnx_val = get_latest_price('^TNX')
 if tnx_val: tnx_yield = tnx_val
+data_quality.record_value("10Y Treasury", "Yahoo Finance ^TNX", tnx_val, fallback_used=tnx_val is None)
 
 dxy_val = get_latest_price('DX-Y.NYB')
 if dxy_val: dxy = dxy_val
+data_quality.record_value("US Dollar Index", "Yahoo Finance DX-Y.NYB", dxy_val, fallback_used=dxy_val is None)
 
 # Put/Call ratio (try multiple tickers)
 for pcr_ticker in ['^PCCE', '^CPCE']:
@@ -488,6 +489,7 @@ for pcr_ticker in ['^PCCE', '^CPCE']:
             put_call_ratio = pcr_val
             break
     except: pass
+data_quality.record_value("Put/Call Ratio", "Yahoo Finance ^PCCE/^CPCE", put_call_ratio)
 
 # VIX (reliable fear gauge, used as fallback chart if P/C unavailable)
 vix = None
@@ -495,6 +497,7 @@ try:
     vix_val = get_latest_price('^VIX')
     if vix_val: vix = vix_val
 except: pass
+data_quality.record_value("VIX Fear Index", "Yahoo Finance ^VIX", vix)
 
 # USD/JPY — yen carry trade indicator
 usdjpy = 150.0
@@ -502,6 +505,7 @@ try:
     jpy_val = get_latest_price('JPY=X')
     if jpy_val: usdjpy = jpy_val
 except: pass
+data_quality.record_value("USD/JPY", "Yahoo Finance JPY=X", jpy_val if 'jpy_val' in locals() else None, fallback_used=not ('jpy_val' in locals() and jpy_val))
 
 jpy_momentum = get_20d_momentum(['JPY=X'])
 
@@ -509,6 +513,7 @@ jpy_momentum = get_20d_momentum(['JPY=X'])
 val_df = get_valuation_metrics(TECH_GIANTS)
 ev_ebitda_vals = val_df['ev_ebitda'].dropna()
 avg_ev_ebitda = ev_ebitda_vals.mean() if len(ev_ebitda_vals) > 0 else 30.0
+data_quality.record_value("AI Sector EV/EBITDA", "Yahoo Finance fundamentals", avg_ev_ebitda, fallback_used=len(ev_ebitda_vals) == 0)
 
 # 動能
 avg_momentum = get_20d_momentum(TW_SUPPLY)
@@ -521,6 +526,7 @@ btc_momentum = get_20d_momentum(['BTC-USD'])
 
 # CapEx
 capex_data = get_hyperscaler_capex()
+data_quality.record_value("Hyperscaler CapEx", "Yahoo Finance cashflow statements", capex_data if capex_data else None)
 
 # Buffett Indicator
 buffett_indicator = None
@@ -532,13 +538,11 @@ try:
         latest_gdp = float(gdp_df.iloc[-1, 1])
         buffett_indicator = (latest_wilshire / latest_gdp) * 100
 except: pass
+data_quality.record_value("Buffett Indicator", "FRED WILL5000PR / GDP", buffett_indicator)
 
 # =============================================================
 # 2. 加權評估系統
 # =============================================================
-def normalize(value, safe_val, danger_val):
-    score = ((value - safe_val) / (danger_val - safe_val)) * 100
-    return min(100, max(0, score))
 
 # X 軸：AI 動能 (完整供應鏈 + SOX + BTC)
 combined_growth = (
@@ -588,100 +592,25 @@ risk_scores = {
     "Unemployment":     normalize(unemployment, 3.5, 6.0),
 }
 
-risk_labels_zh = {
-    "10Y Treasury":      "定價引力",
-    "Fed Funds Rate":    "聯準會利率",
-    "Net Liquidity":     "絕對資金",
-    "M2 Supply YoY":     "貨幣供給",
-    "JPY Liquidity":         "日圓流動性",
-    "Yield Curve":       "衰退警報",
-    "Credit Spread":     "違約風險",
-    "NFCI":              "金融環境",
-    "EV/EBITDA":         "估值極限",
-    "Buffett Indicator": "巴菲特指標",
-    "VXN Volatility":    "市場情緒",
-    "Consumer Sentiment":"消費者信心",
-    "US Dollar":         "全球水閘",
-    "Commodities":       "通膨預期",
-    "Unemployment":      "就業惡化",
-}
+risk_labels_zh = RISK_LABELS_ZH
+risk_cluster = RISK_CLUSTERS
+weights = WEIGHTS
 
-risk_cluster = {
-    "10Y Treasury":      "A 貨幣流動性",
-    "Fed Funds Rate":    "A 貨幣流動性",
-    "Net Liquidity":     "A 貨幣流動性",
-    "M2 Supply YoY":     "A 貨幣流動性",
-    "JPY Liquidity":         "A 貨幣流動性",
-    "Yield Curve":       "B 信用條件",
-    "Credit Spread":     "B 信用條件",
-    "NFCI":              "B 信用條件",
-    "EV/EBITDA":         "C 估值情緒",
-    "Buffett Indicator": "C 估值情緒",
-    "VXN Volatility":    "C 估值情緒",
-    "Consumer Sentiment":"C 估值情緒",
-    "US Dollar":         "D 總體通膨",
-    "Commodities":       "D 總體通膨",
-    "Unemployment":      "D 總體通膨",
-}
-
-weights = {
-    # Cluster A: 33%
-    "10Y Treasury":      0.07,
-    "Fed Funds Rate":    0.07,
-    "Net Liquidity":     0.07,
-    "M2 Supply YoY":     0.05,
-    "JPY Liquidity":         0.07,
-    # Cluster B: 19%
-    "Yield Curve":       0.07,
-    "Credit Spread":     0.06,
-    "NFCI":              0.06,
-    # Cluster C: 24%
-    "EV/EBITDA":         0.07,
-    "Buffett Indicator": 0.06,
-    "VXN Volatility":    0.05,
-    "Consumer Sentiment":0.06,
-    # Cluster D: 24%
-    "US Dollar":         0.08,
-    "Commodities":       0.08,
-    "Unemployment":      0.08,
-}
-
-stress_score = sum(risk_scores[k] * weights[k] for k in risk_scores)
-
-if growth_score >= 0 and stress_score < 50:
-    current_regime = "擴張期 Expansion"
-    regime_color = "#2EA043"; regime_css = "safe"; regime_icon = "●"
-elif growth_score >= 0 and stress_score >= 50:
-    current_regime = "過熱期 Overheating"
-    regime_color = "#D29922"; regime_css = "caution"; regime_icon = "▲"
-elif growth_score < 0 and stress_score >= 50:
-    current_regime = "泡沫破裂 Bust"
-    regime_color = "#F85149"; regime_css = "danger"; regime_icon = "◆"
-else:
-    current_regime = "沉澱期 Contraction"
-    regime_color = "#58A6FF"; regime_css = "cool"; regime_icon = "■"
+stress_score = weighted_stress_score(risk_scores, weights)
+regime = classify_regime(growth_score, stress_score)
+current_regime = regime.name
+regime_color = regime.color
+regime_css = regime.css
+regime_icon = regime.icon
 
 # =============================================================
 # 3. 歷史記錄存檔
 # =============================================================
-HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stress_history.json")
-
-def load_history():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_history(history):
-    try:
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history, f, indent=2)
-    except: pass
-
-history = load_history()
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+HISTORY_FILE = os.path.join(APP_DIR, "stress_history.json")
+HISTORY_DB = os.path.join(APP_DIR, "data", "stress_history.sqlite3")
+history_store = HistoryStore(HISTORY_DB, legacy_json_path=HISTORY_FILE)
+history = history_store.load_history()
 now_str = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M')
 
 if not history or history[-1].get('time', '') != now_str:
@@ -712,29 +641,51 @@ if not history or history[-1].get('time', '') != now_str:
     if margin_debt:
         record['margin_debt'] = round(margin_debt, 2)
 
-    history.append(record)
-    if len(history) > 2000:
-        history = history[-2000:]
-    save_history(history)
+    history_store.upsert_record(record)
+    history = history_store.load_history()
 
 # =============================================================
 # 3.5 Δ Stress 速度指標
 # =============================================================
-def calc_delta_stress(history, hours_back):
-    if len(history) < 2:
-        return None
-    now = datetime.datetime.utcnow()
-    cutoff = now - datetime.timedelta(hours=hours_back)
-    past_records = [h for h in history[:-1]
-                    if datetime.datetime.strptime(h['time'], '%Y-%m-%d %H:%M') <= cutoff]
-    if not past_records:
-        past_records = [history[0]]
-    ref = past_records[-1]
-    return stress_score - ref['stress_score']
+delta_24h = stress_delta(history, stress_score, 24, datetime.datetime.utcnow())
+delta_7d = stress_delta(history, stress_score, 24 * 7, datetime.datetime.utcnow())
+delta_30d = stress_delta(history, stress_score, 24 * 30, datetime.datetime.utcnow())
 
-delta_24h = calc_delta_stress(history, 24)
-delta_7d = calc_delta_stress(history, 24 * 7)
-delta_30d = calc_delta_stress(history, 24 * 30)
+active_alerts = evaluate_alerts({
+    "stress_score": stress_score,
+    "delta_24h": delta_24h,
+    "nfci": nfci,
+    "m2_yoy": m2_yoy,
+    "consumer_sentiment": consumer_sentiment,
+    "buffett_indicator": buffett_indicator,
+    "regime": current_regime,
+})
+
+def alert_ready_for_dispatch(alert, now):
+    try:
+        cooldown_hours = int(os.environ.get("ALERT_COOLDOWN_HOURS", "6"))
+    except ValueError:
+        cooldown_hours = 6
+    event = history_store.get_alert_event(alert.key)
+    if not event:
+        return True
+    try:
+        last_sent = datetime.datetime.strptime(event["last_sent_time"], "%Y-%m-%d %H:%M")
+    except (KeyError, TypeError, ValueError):
+        return True
+    return now - last_sent >= datetime.timedelta(hours=cooldown_hours)
+
+alert_dispatch_time = datetime.datetime.utcnow()
+dispatchable_alerts = [
+    alert for alert in active_alerts
+    if alert_ready_for_dispatch(alert, alert_dispatch_time)
+]
+notification_results = dispatch_alerts(dispatchable_alerts)
+if notification_results:
+    sent_time_label = alert_dispatch_time.strftime("%Y-%m-%d %H:%M")
+    for alert in dispatchable_alerts:
+        history_store.mark_alert_sent(alert.key, sent_time_label, alert.to_dict())
+configured_notification_channels = enabled_channels()
 
 def delta_color(val):
     if val is None: return "#484F58"
@@ -873,6 +824,50 @@ for i, (label, value, color) in enumerate(kpi_data_r3):
 st.markdown("---")
 
 # =============================================================
+# 專業監控中心：警報、資料品質、模型治理
+# =============================================================
+st.markdown("## ALERT CENTER & DATA QUALITY")
+alert_col, quality_col = st.columns([1.2, 1])
+
+with alert_col:
+    if active_alerts:
+        for alert in active_alerts:
+            if alert.severity == "critical":
+                st.error(f"**{alert.title}** — {alert.message}")
+            else:
+                st.warning(f"**{alert.title}** — {alert.message}")
+    else:
+        st.success("No active alert rules breached.")
+
+    channel_label = ", ".join(configured_notification_channels) if configured_notification_channels else "not configured"
+    alert_dispatch_state = "enabled" if os.environ.get("ALERTS_ENABLED") == "1" else "disabled"
+    st.caption(f"Notification dispatch: {alert_dispatch_state}. Channels: {channel_label}. Telegram is intentionally excluded.")
+    if notification_results:
+        st.caption(f"Dispatch results: {notification_results}")
+
+with quality_col:
+    quality_counts = data_quality.counts()
+    health = data_quality.health_score()
+    q_cols = st.columns(4)
+    q_cols[0].metric("Data Health", f"{health}%")
+    q_cols[1].metric("Fresh", quality_counts.get("fresh", 0))
+    q_cols[2].metric("Fallback", quality_counts.get("fallback", 0))
+    q_cols[3].metric("Errors", quality_counts.get("error", 0))
+
+with st.expander("Data source status and model methodology", expanded=False):
+    dq_df = pd.DataFrame(data_quality.rows())
+    if not dq_df.empty:
+        st.dataframe(dq_df, use_container_width=True, hide_index=True)
+
+    st.markdown("#### Scoring Methodology")
+    st.dataframe(pd.DataFrame(FACTOR_METHODOLOGY), use_container_width=True, hide_index=True)
+
+    st.markdown("#### AI Growth Momentum Components")
+    st.dataframe(pd.DataFrame(GROWTH_COMPONENTS), use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# =============================================================
 # 第一排：Regime Map + Risk Radar
 # =============================================================
 st.markdown("## REGIME MAP & RISK DECOMPOSITION")
@@ -971,14 +966,7 @@ st.markdown("---")
 st.markdown("## CLUSTER STRESS DECOMPOSITION")
 st.markdown("<p style='color:#8B949E; font-size:0.8rem; margin-top:-10px;'>15 因子分 4 群組 — 各群組加權壓力貢獻</p>", unsafe_allow_html=True)
 
-cluster_scores = {}
-for k in risk_scores:
-    cl = risk_cluster[k]
-    if cl not in cluster_scores:
-        cluster_scores[cl] = {'total': 0, 'weight_sum': 0, 'factors': []}
-    cluster_scores[cl]['total'] += risk_scores[k] * weights[k]
-    cluster_scores[cl]['weight_sum'] += weights[k]
-    cluster_scores[cl]['factors'].append((k, risk_scores[k], weights[k]))
+cluster_scores = cluster_decomposition(risk_scores, weights, risk_cluster)
 
 cluster_cols = st.columns(4)
 cluster_colors = {"A 貨幣流動性": "#58A6FF", "B 信用條件": "#BC8CFF", "C 估值情緒": "#F0883E", "D 總體通膨": "#39D2C0"}

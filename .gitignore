@@ -3,3 +3,7 @@ __pycache__/
 .env
 stress_history.json
 .claude/
+data/*.sqlite3
+data/*.sqlite3-shm
+data/*.sqlite3-wal
+*.log

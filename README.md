@@ -8,7 +8,7 @@
 
 ## What is this?
 
-A real-time dashboard that monitors **whether the AI bubble is at risk of bursting** by combining 14 macroeconomic, financial, and sentiment indicators into a single weighted stress score (0-100).
+A real-time dashboard that monitors **whether the AI bubble is at risk of bursting** by combining 15 macroeconomic, financial, and sentiment indicators into a single weighted stress score (0-100).
 
 The system classifies the current market regime into one of four states:
 
@@ -24,10 +24,10 @@ The system classifies the current market regime into one of four states:
 ## Dashboard Preview
 
 ### Regime Banner & KPI Cards
-The top section shows the current regime classification, weighted stress score, and 14 real-time macro indicators across two rows of KPI cards.
+The top section shows the current regime classification, weighted stress score, and 15 real-time macro indicators across KPI cards.
 
-### 14-Factor Risk Radar
-A polar chart decomposing risk across all 14 dimensions, with a safe-zone overlay at score 30.
+### 15-Factor Risk Radar
+A polar chart decomposing risk across all 15 dimensions, with a safe-zone overlay at score 30.
 
 ### Cluster Stress Decomposition
 Four cluster cards showing weighted contributions from each risk group, with per-factor drill-down.
@@ -108,7 +108,7 @@ Organized into 4 clusters:
 
 ## Conditional Alert System
 
-The dashboard automatically triggers warnings when thresholds are breached:
+The dashboard automatically triggers warnings when thresholds are breached. Optional external dispatch supports Email, Discord, and generic JSON webhooks. Telegram push is intentionally not included.
 
 | Condition | Alert |
 |-----------|-------|
@@ -116,6 +116,11 @@ The dashboard automatically triggers warnings when thresholds are breached:
 | NFCI > 0.2 | Financial conditions tightening |
 | M2 YoY < -2% | Liquidity contraction (rare, high severity) |
 | Buffett Indicator > 200% | Extreme market overvaluation |
+| Stress Score >= 65 / 75 | Elevated / danger stress zone |
+| 24H Stress Delta >= 5 | Fast stress acceleration |
+| Bust regime | Negative AI momentum plus elevated macro stress |
+
+External dispatch is disabled by default. Copy `.env.example`, set the channel credentials, and set `ALERTS_ENABLED=1`.
 
 ---
 
@@ -125,7 +130,7 @@ The dashboard automatically triggers warnings when thresholds are breached:
 - **Charts**: [Plotly](https://plotly.com/python/) with Bloomberg-style color palette
 - **Data**: [FRED](https://fred.stlouisfed.org/) (macroeconomic) + [Yahoo Finance](https://finance.yahoo.com/) (market data)
 - **Automation**: GitHub Actions (hourly cron)
-- **Storage**: Local JSON for historical stress score archiving
+- **Storage**: SQLite for historical stress score archiving, with legacy JSON migration
 
 ---
 
@@ -161,12 +166,16 @@ The dashboard will open at `http://localhost:8501`.
 
 ```
 ai-bubble-monitor/
-  Ai_bubble_monitor.py          # Main application (v6.0)
+  Ai_bubble_monitor.py          # Main Streamlit application
+  bubble_monitor/               # Scoring, config, data quality, storage, alerts
+  docs/
+    ARCHITECTURE.md             # Runtime architecture and alert policy
+  tests/                        # Focused unit tests for non-UI core logic
   requirements.txt              # Python dependencies
   .github/workflows/
     hourly_monitor.yml           # GitHub Actions hourly cron job
   .gitignore                    # Excludes local history file
-  stress_history.json           # Auto-generated (gitignored)
+  data/stress_history.sqlite3   # Auto-generated SQLite history (gitignored)
   README.md                    # This file
 ```
 

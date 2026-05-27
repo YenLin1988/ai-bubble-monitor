@@ -26,4 +26,4 @@ jobs:
         pip install yfinance pandas pandas-datareader
 
     - name: 執行 AI 泡沫監控模型
-      run: python ai_bubble_monitor.py
+      run: python Ai_bubble_monitor.py

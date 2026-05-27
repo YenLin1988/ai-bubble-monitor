@@ -41,7 +41,7 @@ try:
     latest_spread = float(pd.read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A0HYM2', na_values='.').dropna().iloc[-1, 1])
     latest_curve = float(pd.read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y', na_values='.').dropna().iloc[-1, 1])
     walcl = float(pd.read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=WALCL', na_values='.').dropna().iloc[-1, 1]) / 1000
-    tga = float(pd.read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=WTREGEN', na_values='.').dropna().iloc[-1, 1])
+    tga = float(pd.read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=WTREGEN', na_values='.').dropna().iloc[-1, 1]) / 1000
     rrp = float(pd.read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=RRPONTSYD', na_values='.').dropna().iloc[-1, 1])
     net_liquidity = walcl - tga - rrp 
 except: pass

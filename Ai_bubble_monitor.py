@@ -185,3 +185,40 @@ met_col2.metric("10Y-2Y Curve", f"{latest_curve:.2f}%")
 met_col3.metric("VXN Index", f"{vxn:.2f}")
 met_col4.metric("EV/EBITDA Avg", f"{avg_ev_ebitda:.1f}x")
 met_col5.metric("Supply Chain (20d)", f"{avg_momentum*100:.2f}%")
+# -------------------------------------------------------------
+# 動態分析與風險總結 (Dynamic Analysis & Summary)
+# -------------------------------------------------------------
+st.markdown("---")
+st.markdown("### 📝 市場狀態解析與行動建議")
+
+# 1. 尋找最大風險來源
+risk_factors = {
+    "信用利差 (Credit Spread)": radar_vals[0],
+    "殖利率曲線 (Yield Curve)": radar_vals[1],
+    "市場恐慌度 (Volatility)": radar_vals[2],
+    "估值倍數 (EV/EBITDA)": radar_vals[3],
+    "供應鏈衰退 (Supply Chain)": radar_vals[4]
+}
+# 找出雷達圖中數值最大的那一項
+primary_risk_name = max(risk_factors, key=risk_factors.get)
+primary_risk_value = risk_factors[primary_risk_name]
+
+# 2. 組合分析報告文字
+st.write(f"**📍 核心狀態判讀：** 系統判定目前處於 **{current_regime}**。")
+
+if "擴張期" in current_regime:
+    st.info("目前 AI 基本面動能強勁（如台系硬體供應鏈持續創高），且總體流動性壓力極低。這是一個『金髮女孩』的完美環境，建議維持既有多頭部位，享受市場紅利。")
+elif "過熱期" in current_regime:
+    st.warning(f"請注意！雖然 AI 基本面依然強勁，支撐著股市動能，但總經環境已亮起紅燈。目前的壓力主要來自於總體經濟面的緊縮。")
+    if primary_risk_value > 60:
+        st.write(f"**🚨 首要風險來源：** 目前雷達圖顯示最大的風險來自於 **「{primary_risk_name}」**。")
+        st.write("這意味著市場正處於『基本面與資金面拔河』的階段。建議不要過度追高，可考慮將部分獲利了結，或買入賣權 (Put) 替部位買保險。")
+elif "泡沫破裂" in current_regime:
+    st.error("危險訊號！AI 硬體供應鏈已出現疲態（動能轉負），且總體流動性正在枯竭。基本面與資金面遭到雙殺，市場即將或正在經歷劇烈修正。")
+    st.write("🛑 **行動建議：** 建議大幅降低科技股曝險，提高現金比例，並轉進防禦型資產（如短天期美債）。")
+elif "沉澱期" in current_regime:
+    st.success("目前市場處於低動能且低壓力的狀態。這通常發生在泡沫破裂後的打底期。")
+    st.write("💡 **行動建議：** 恐慌情緒已散去，估值回到合理區間，是長線投資人開始分批佈局優質 AI 龍頭股的絕佳時機。")
+
+# 免責聲明
+st.caption("Disclaimer: 本模型由量化指標自動生成，僅供觀察總經環境與市場情緒參考，不構成任何具體投資建議。")

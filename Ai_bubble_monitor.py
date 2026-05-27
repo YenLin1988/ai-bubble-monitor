@@ -456,6 +456,15 @@ try:
     if vix_val: vix = vix_val
 except: pass
 
+# USD/JPY — yen carry trade indicator
+usdjpy = 150.0
+try:
+    jpy_val = get_latest_price('JPY=X')
+    if jpy_val: usdjpy = jpy_val
+except: pass
+
+jpy_momentum = get_20d_momentum(['JPY=X'])
+
 # 估值數據
 val_df = get_valuation_metrics(TECH_GIANTS)
 ev_ebitda_vals = val_df['ev_ebitda'].dropna()
@@ -498,29 +507,37 @@ combined_growth = (
 )
 growth_score = min(100, max(-100, combined_growth * 1000))
 
-# Y 軸：12 因子壓力評估系統 (4 群組)
-# ── Cluster A: 貨幣政策與流動性 (30%)
-# ── Cluster B: 信用與金融條件 (20%)
-# ── Cluster C: 估值與情緒 (25%)
-# ── Cluster D: 總體經濟與通膨 (25%)
+# Y 軸：15 因子壓力評估系統 (4 群組)
+# ── Cluster A: 貨幣政策與流動性 (33%)
+# ── Cluster B: 信用與金融條件 (19%)
+# ── Cluster C: 估值與情緒 (24%)
+# ── Cluster D: 總體經濟與通膨 (24%)
 
 buffett_val = buffett_indicator if buffett_indicator else 130
+
+# JPY carry stress: rapid yen strengthening (USD/JPY dropping) = carry unwind = liquidity stress
+# Safe: stable at 150+, Danger: rapid drop to 130 (carry unwind territory)
+jpy_carry_stress = normalize(150 - usdjpy, 0, 20)
+# Also factor in momentum: sharp yen strengthening amplifies stress
+if jpy_momentum < -0.03:
+    jpy_carry_stress = min(100, jpy_carry_stress + normalize(-jpy_momentum, 0.03, 0.10) * 0.3)
 
 risk_scores = {
     # Cluster A: 貨幣政策與流動性
     "10Y Treasury":     normalize(tnx_yield, 3.5, 5.0),
     "Fed Funds Rate":   normalize(fed_funds, 3.0, 5.5),
     "Net Liquidity":    normalize(6200 - net_liquidity, 0, 800),
-    "M2 Supply YoY":    normalize(-m2_yoy, -6, 2),  # M2 shrinking = stress
+    "M2 Supply YoY":    normalize(-m2_yoy, -6, 2),
+    "JPY Carry":        jpy_carry_stress,
     # Cluster B: 信用與金融條件
     "Yield Curve":      normalize(latest_curve, -0.8, 0.2),
     "Credit Spread":    normalize(latest_spread, 3.0, 5.5),
-    "NFCI":             normalize(nfci, -0.5, 0.5),  # positive = tightening
+    "NFCI":             normalize(nfci, -0.5, 0.5),
     # Cluster C: 估值與情緒
     "EV/EBITDA":        normalize(avg_ev_ebitda, 25, 45),
     "Buffett Indicator": normalize(buffett_val, 100, 200),
     "VXN Volatility":   normalize(vxn, 15, 35),
-    "Consumer Sentiment": normalize(100 - consumer_sentiment, 30, 70),  # low sentiment = stress
+    "Consumer Sentiment": normalize(100 - consumer_sentiment, 30, 70),
     # Cluster D: 總體經濟與通膨
     "US Dollar":        normalize(dxy, 100.0, 107.0),
     "Commodities":      normalize(comm_momentum, 0.0, 0.10),
@@ -532,6 +549,7 @@ risk_labels_zh = {
     "Fed Funds Rate":    "聯準會利率",
     "Net Liquidity":     "絕對資金",
     "M2 Supply YoY":     "貨幣供給",
+    "JPY Carry":         "日圓套利",
     "Yield Curve":       "衰退警報",
     "Credit Spread":     "違約風險",
     "NFCI":              "金融環境",
@@ -549,6 +567,7 @@ risk_cluster = {
     "Fed Funds Rate":    "A 貨幣流動性",
     "Net Liquidity":     "A 貨幣流動性",
     "M2 Supply YoY":     "A 貨幣流動性",
+    "JPY Carry":         "A 貨幣流動性",
     "Yield Curve":       "B 信用條件",
     "Credit Spread":     "B 信用條件",
     "NFCI":              "B 信用條件",
@@ -562,22 +581,23 @@ risk_cluster = {
 }
 
 weights = {
-    # Cluster A: 30%
-    "10Y Treasury":      0.08,
-    "Fed Funds Rate":    0.08,
-    "Net Liquidity":     0.08,
-    "M2 Supply YoY":     0.06,
-    # Cluster B: 20%
+    # Cluster A: 33%
+    "10Y Treasury":      0.07,
+    "Fed Funds Rate":    0.07,
+    "Net Liquidity":     0.07,
+    "M2 Supply YoY":     0.05,
+    "JPY Carry":         0.07,
+    # Cluster B: 19%
     "Yield Curve":       0.07,
-    "Credit Spread":     0.07,
+    "Credit Spread":     0.06,
     "NFCI":              0.06,
-    # Cluster C: 25%
+    # Cluster C: 24%
     "EV/EBITDA":         0.07,
     "Buffett Indicator": 0.06,
-    "VXN Volatility":    0.06,
+    "VXN Volatility":    0.05,
     "Consumer Sentiment":0.06,
-    # Cluster D: 25%
-    "US Dollar":         0.09,
+    # Cluster D: 24%
+    "US Dollar":         0.08,
     "Commodities":       0.08,
     "Unemployment":      0.08,
 }
@@ -717,6 +737,7 @@ kpi_data_r1 = [
     ("US Dollar Index", f"{dxy:.2f}", risk_color(risk_scores["US Dollar"])),
     ("Net Liquidity", f"${net_liquidity/1000:.2f}T", risk_color(risk_scores["Net Liquidity"])),
     ("M2 Money YoY", f"{m2_yoy:+.1f}%", risk_color(risk_scores["M2 Supply YoY"])),
+    ("JPY 日圓套利", f"{usdjpy:.1f}", risk_color(risk_scores["JPY Carry"])),
     ("Yield Curve", f"{latest_curve:.2f}%", risk_color(risk_scores["Yield Curve"])),
     ("NFCI 金融環境", f"{nfci:+.2f}", risk_color(risk_scores["NFCI"])),
 ]
@@ -729,13 +750,14 @@ kpi_data_r2 = [
     ("SOX Momentum", f"{sox_momentum*100:+.1f}%", "#2EA043" if sox_momentum > 0 else ("#D29922" if sox_momentum > -0.05 else "#F85149")),
     ("BTC Momentum", f"{btc_momentum*100:+.1f}%", "#2EA043" if btc_momentum > 0 else ("#D29922" if btc_momentum > -0.05 else "#F85149")),
     ("Buffett Indicator", f"{buffett_val:.0f}%", risk_color(risk_scores["Buffett Indicator"])),
+    ("JPY Momentum", f"{jpy_momentum*100:+.1f}%", "#2EA043" if jpy_momentum < 0 else ("#D29922" if jpy_momentum < 0.03 else "#F85149")),
 ]
 
-cols_r1 = st.columns(7)
+cols_r1 = st.columns(8)
 for i, (label, value, color) in enumerate(kpi_data_r1):
     cols_r1[i].markdown(kpi_card(label, value, color), unsafe_allow_html=True)
 
-cols_r2 = st.columns(7)
+cols_r2 = st.columns(8)
 for i, (label, value, color) in enumerate(kpi_data_r2):
     cols_r2[i].markdown(kpi_card(label, value, color), unsafe_allow_html=True)
 

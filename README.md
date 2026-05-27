@@ -1,6 +1,6 @@
 # AI Bubble Monitor v6.0
 
-**Global Macro Regime Radar** — 14-Factor Weighted Stress Scoring System for AI Bubble Risk Assessment
+**Global Macro Regime Radar** — 15-Factor Weighted Stress Scoring System for AI Bubble Risk Assessment
 
 [![Hourly Monitor](https://github.com/YenLin1988/ai-bubble-monitor/actions/workflows/hourly_monitor.yml/badge.svg)](https://github.com/YenLin1988/ai-bubble-monitor/actions/workflows/hourly_monitor.yml)
 
@@ -37,43 +37,44 @@ Quarterly capital expenditure for MSFT, GOOG, AMZN, and META, plus CapEx-as-%-of
 
 ---
 
-## 14-Factor Scoring Model
+## 15-Factor Scoring Model
 
 ### Y-Axis: Weighted Stress Score (0-100)
 
 Organized into 4 clusters:
 
-#### Cluster A: Monetary Policy & Liquidity (30%)
+#### Cluster A: Monetary Policy & Liquidity (33%)
 
 | Factor | Source | Safe | Danger | Weight |
 |--------|--------|------|--------|--------|
-| 10Y Treasury Yield | FRED: GS10 / Yahoo: ^TNX | 3.5% | 5.0% | 8% |
-| Fed Funds Rate | FRED: FEDFUNDS | 3.0% | 5.5% | 8% |
-| Net Liquidity (Fed B/S - TGA - RRP) | FRED: WALCL, WTREGEN, RRPONTSYD | $6.2T | $5.4T | 8% |
-| M2 Money Supply YoY | FRED: M2SL | +6% | -2% | 6% |
+| 10Y Treasury Yield | FRED: GS10 / Yahoo: ^TNX | 3.5% | 5.0% | 7% |
+| Fed Funds Rate | FRED: FEDFUNDS | 3.0% | 5.5% | 7% |
+| Net Liquidity (Fed B/S - TGA - RRP) | FRED: WALCL, WTREGEN, RRPONTSYD | $6.2T | $5.4T | 7% |
+| M2 Money Supply YoY | FRED: M2SL | +6% | -2% | 5% |
+| JPY Carry Trade Stress | Yahoo: JPY=X (USD/JPY + 20d momentum) | 150+ (stable) | 130 (unwind) | 7% |
 
-#### Cluster B: Credit & Financial Conditions (20%)
+#### Cluster B: Credit & Financial Conditions (19%)
 
 | Factor | Source | Safe | Danger | Weight |
 |--------|--------|------|--------|--------|
 | 10Y-2Y Yield Curve | FRED: T10Y2Y | -0.8% | +0.2% | 7% |
-| HY Credit Spread | FRED: BAMLH0A0HYM2 | 3.0% | 5.5% | 7% |
+| HY Credit Spread | FRED: BAMLH0A0HYM2 | 3.0% | 5.5% | 6% |
 | Chicago Fed NFCI | FRED: NFCI | -0.5 | +0.5 | 6% |
 
-#### Cluster C: Valuation & Sentiment (25%)
+#### Cluster C: Valuation & Sentiment (24%)
 
 | Factor | Source | Safe | Danger | Weight |
 |--------|--------|------|--------|--------|
 | AI Sector EV/EBITDA | Yahoo Finance (NVDA, MSFT, META, GOOG, AMZN) | 25x | 45x | 7% |
 | Buffett Indicator | FRED: WILL5000PR / GDP | 100% | 200% | 6% |
-| VXN (Nasdaq Volatility) | Yahoo: ^VXN | 15 | 35 | 6% |
+| VXN (Nasdaq Volatility) | Yahoo: ^VXN | 15 | 35 | 5% |
 | U. Michigan Consumer Sentiment | FRED: UMCSENT | 70+ | <30 | 6% |
 
-#### Cluster D: Macro & Inflation (25%)
+#### Cluster D: Macro & Inflation (24%)
 
 | Factor | Source | Safe | Danger | Weight |
 |--------|--------|------|--------|--------|
-| US Dollar Index | Yahoo: DX-Y.NYB | 100 | 107 | 9% |
+| US Dollar Index | Yahoo: DX-Y.NYB | 100 | 107 | 8% |
 | Commodity Momentum (20d) | Yahoo: CL=F, GC=F | 0% | +10% | 8% |
 | Unemployment Rate | FRED: UNRATE | 3.5% | 6.0% | 8% |
 

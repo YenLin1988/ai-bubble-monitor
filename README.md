@@ -1,4 +1,4 @@
-# AI Bubble Monitor v6.0
+# AI Bubble Monitor v7.0
 
 **Global Macro Regime Radar** — 15-Factor Weighted Stress Scoring System for AI Bubble Risk Assessment
 
@@ -82,8 +82,10 @@ Organized into 4 clusters:
 
 | Component | Ticker(s) | Weight |
 |-----------|-----------|--------|
-| Taiwan Supply Chain | TSM, UMC, ASX | 35% |
-| AI Infrastructure | MU, VRT | 25% |
+| Taiwan Supply Chain | TSM, UMC, ASX | 20% |
+| AI Infrastructure | MU, VRT | 15% |
+| Semiconductor Equipment | ASML, AMAT, LRCX | 15% |
+| AI Networking Chips | AVGO | 10% |
 | SOX Semiconductor Index | ^SOX | 25% |
 | Bitcoin (Risk Appetite Proxy) | BTC-USD | 15% |
 
@@ -95,9 +97,12 @@ Organized into 4 clusters:
 |-----------|---------|
 | FINRA Margin Debt | Leverage / speculation level |
 | CBOE Put/Call Ratio | Options market fear gauge |
+| VIX Fear Index | Market fear fallback when P/C unavailable |
 | Hyperscaler CapEx (MSFT/GOOG/AMZN/META) | AI arms race spending intensity |
 | Per-stock valuation matrix (P/E, P/S, P/FCF, PEG) | Individual AI stock health |
 | Historical stress score archive | Trend analysis over time |
+| Δ Stress velocity (24H / 7D / 30D) | Rate of stress change — speed matters |
+| Historical crisis overlay (2000 / 2008 / 2022) | Pattern comparison with past bubbles |
 
 ---
 

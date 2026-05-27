@@ -267,6 +267,8 @@ def risk_color(score):
 TECH_GIANTS = ['NVDA', 'MSFT', 'META', 'GOOG', 'AMZN']
 TW_SUPPLY = ['TSM', 'UMC', 'ASX']
 INFRA_STOCKS = ['MU', 'VRT']
+EQUIP_STOCKS = ['ASML', 'AMAT', 'LRCX']
+NETWORK_STOCKS = ['AVGO']
 COMMODITIES = ['CL=F', 'GC=F']
 HYPERSCALERS = ['MSFT', 'GOOG', 'AMZN', 'META']
 
@@ -473,6 +475,8 @@ avg_ev_ebitda = ev_ebitda_vals.mean() if len(ev_ebitda_vals) > 0 else 30.0
 # 動能
 avg_momentum = get_20d_momentum(TW_SUPPLY)
 infra_momentum = get_20d_momentum(INFRA_STOCKS)
+equip_momentum = get_20d_momentum(EQUIP_STOCKS)
+network_momentum = get_20d_momentum(NETWORK_STOCKS)
 comm_momentum = get_20d_momentum(COMMODITIES)
 sox_momentum = get_20d_momentum(['^SOX'])
 btc_momentum = get_20d_momentum(['BTC-USD'])
@@ -498,10 +502,12 @@ def normalize(value, safe_val, danger_val):
     score = ((value - safe_val) / (danger_val - safe_val)) * 100
     return min(100, max(0, score))
 
-# X 軸：AI 動能 (加入 SOX 半導體 + BTC 風險偏好)
+# X 軸：AI 動能 (完整供應鏈 + SOX + BTC)
 combined_growth = (
-    avg_momentum * 0.35 +      # 台系代工
-    infra_momentum * 0.25 +    # AI 基礎設施
+    avg_momentum * 0.20 +      # 台系代工 (TSM, UMC, ASX)
+    infra_momentum * 0.15 +    # AI 基礎設施 (MU, VRT)
+    equip_momentum * 0.15 +    # 半導體設備 (ASML, AMAT, LRCX)
+    network_momentum * 0.10 +  # AI 網通晶片 (AVGO)
     sox_momentum * 0.25 +      # 半導體指數
     btc_momentum * 0.15        # 風險偏好代理
 )
@@ -674,6 +680,36 @@ if not history or history[-1].get('time', '') != now_str:
     save_history(history)
 
 # =============================================================
+# 3.5 Δ Stress 速度指標
+# =============================================================
+def calc_delta_stress(history, hours_back):
+    if len(history) < 2:
+        return None
+    now = datetime.datetime.utcnow()
+    cutoff = now - datetime.timedelta(hours=hours_back)
+    past_records = [h for h in history[:-1]
+                    if datetime.datetime.strptime(h['time'], '%Y-%m-%d %H:%M') <= cutoff]
+    if not past_records:
+        past_records = [history[0]]
+    ref = past_records[-1]
+    return stress_score - ref['stress_score']
+
+delta_24h = calc_delta_stress(history, 24)
+delta_7d = calc_delta_stress(history, 24 * 7)
+delta_30d = calc_delta_stress(history, 24 * 30)
+
+def delta_color(val):
+    if val is None: return "#484F58"
+    if val > 5: return "#F85149"
+    if val > 2: return "#D29922"
+    if val < -2: return "#2EA043"
+    return "#E6EDF3"
+
+def delta_str(val):
+    if val is None: return "—"
+    return f"{val:+.1f}"
+
+# =============================================================
 # 4. 頁面渲染
 # =============================================================
 # --- Title ---
@@ -681,7 +717,7 @@ st.markdown(f"""
 <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
     <h1 style="margin:0; border:none !important; padding:0;">Global Macro Regime Radar</h1>
     <span style="font-size:0.7rem; color:#484F58; background:#161B22; padding:3px 10px; border-radius:9999px; border:1px solid #21262D;
-                 font-family:'JetBrains Mono',monospace; font-weight:500;">v6.0</span>
+                 font-family:'JetBrains Mono',monospace; font-weight:500;">v7.0</span>
 </div>
 <p style="color:#484F58; font-size:0.75rem; font-family:'JetBrains Mono',monospace; margin:0 0 20px 0;">
     {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC &nbsp;·&nbsp; FRED &nbsp;·&nbsp; Yahoo Finance
@@ -701,7 +737,21 @@ st.markdown(f"""
         </div>
         <div class="regime-right">
             <div class="regime-score" style="color:{regime_color};">{stress_score:.1f}</div>
-            <div class="regime-label">Weighted Stress Score</div>
+            <div class="regime-label">WEIGHTED STRESS SCORE</div>
+            <div style="display:flex; gap:16px; justify-content:flex-end; margin-top:8px;">
+                <div style="text-align:center;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:0.85rem; font-weight:600; color:{delta_color(delta_24h)};">{delta_str(delta_24h)}</div>
+                    <div style="font-size:0.55rem; color:#484F58; text-transform:uppercase; letter-spacing:0.05em;">Δ 24H</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:0.85rem; font-weight:600; color:{delta_color(delta_7d)};">{delta_str(delta_7d)}</div>
+                    <div style="font-size:0.55rem; color:#484F58; text-transform:uppercase; letter-spacing:0.05em;">Δ 7D</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:0.85rem; font-weight:600; color:{delta_color(delta_30d)};">{delta_str(delta_30d)}</div>
+                    <div style="font-size:0.55rem; color:#484F58; text-transform:uppercase; letter-spacing:0.05em;">Δ 30D</div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -747,10 +797,26 @@ kpi_data_r2 = [
     ("VXN 波動指數", f"{vxn:.1f}", risk_color(risk_scores["VXN Volatility"])),
     ("Unemployment", f"{unemployment:.1f}%", risk_color(risk_scores["Unemployment"])),
     ("消費者信心", f"{consumer_sentiment:.0f}", risk_color(risk_scores["Consumer Sentiment"])),
-    ("SOX Momentum", f"{sox_momentum*100:+.1f}%", "#2EA043" if sox_momentum > 0 else ("#D29922" if sox_momentum > -0.05 else "#F85149")),
-    ("BTC Momentum", f"{btc_momentum*100:+.1f}%", "#2EA043" if btc_momentum > 0 else ("#D29922" if btc_momentum > -0.05 else "#F85149")),
     ("Buffett Indicator", f"{buffett_val:.0f}%", risk_color(risk_scores["Buffett Indicator"])),
-    ("JPY Momentum", f"{jpy_momentum*100:+.1f}%", "#2EA043" if jpy_momentum < 0 else ("#D29922" if jpy_momentum < 0.03 else "#F85149")),
+    ("JPY 日圓動能", f"{jpy_momentum*100:+.1f}%", "#2EA043" if jpy_momentum < 0 else ("#D29922" if jpy_momentum < 0.03 else "#F85149")),
+    ("Δ Stress 24H", delta_str(delta_24h), delta_color(delta_24h)),
+    ("Δ Stress 7D", delta_str(delta_7d), delta_color(delta_7d)),
+]
+
+def mom_color(val):
+    if val > 0: return "#2EA043"
+    if val > -0.05: return "#D29922"
+    return "#F85149"
+
+kpi_data_r3 = [
+    ("台系代工 TSM", f"{avg_momentum*100:+.1f}%", mom_color(avg_momentum)),
+    ("AI基礎設施 MU", f"{infra_momentum*100:+.1f}%", mom_color(infra_momentum)),
+    ("半導體設備 ASML", f"{equip_momentum*100:+.1f}%", mom_color(equip_momentum)),
+    ("網通晶片 AVGO", f"{network_momentum*100:+.1f}%", mom_color(network_momentum)),
+    ("SOX 半導體指數", f"{sox_momentum*100:+.1f}%", mom_color(sox_momentum)),
+    ("BTC 風險偏好", f"{btc_momentum*100:+.1f}%", mom_color(btc_momentum)),
+    ("綜合 AI 動能", f"{combined_growth*100:+.2f}%", mom_color(combined_growth)),
+    ("Growth Score", f"{growth_score:+.1f}", "#2EA043" if growth_score > 0 else "#F85149"),
 ]
 
 cols_r1 = st.columns(8)
@@ -760,6 +826,11 @@ for i, (label, value, color) in enumerate(kpi_data_r1):
 cols_r2 = st.columns(8)
 for i, (label, value, color) in enumerate(kpi_data_r2):
     cols_r2[i].markdown(kpi_card(label, value, color), unsafe_allow_html=True)
+
+st.markdown("<p style='color:#484F58; font-size:0.65rem; margin:8px 0 4px 0; text-transform:uppercase; letter-spacing:0.08em;'>AI Supply Chain Momentum (20D)</p>", unsafe_allow_html=True)
+cols_r3 = st.columns(8)
+for i, (label, value, color) in enumerate(kpi_data_r3):
+    cols_r3[i].markdown(kpi_card(label, value, color), unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -842,7 +913,7 @@ with col_radar:
         line=dict(color=regime_color, width=2),
         name="Current Risk"
     ))
-    apply_theme(fig_radar, title_text="14-Factor Risk Decomposition",
+    apply_theme(fig_radar, title_text="15-Factor Risk Decomposition",
         polar=dict(
             radialaxis=dict(visible=True, range=[0, 100], gridcolor="#21262D",
                            tickfont=dict(size=9, color="#484F58")),
@@ -860,7 +931,7 @@ st.markdown("---")
 # 群組壓力分解 (Cluster Breakdown)
 # =============================================================
 st.markdown("## CLUSTER STRESS DECOMPOSITION")
-st.markdown("<p style='color:#8B949E; font-size:0.8rem; margin-top:-10px;'>14 因子分 4 群組 — 各群組加權壓力貢獻</p>", unsafe_allow_html=True)
+st.markdown("<p style='color:#8B949E; font-size:0.8rem; margin-top:-10px;'>15 因子分 4 群組 — 各群組加權壓力貢獻</p>", unsafe_allow_html=True)
 
 cluster_scores = {}
 for k in risk_scores:
@@ -1233,47 +1304,104 @@ if len(history) > 1:
     hist_df = pd.DataFrame(history)
     hist_df['time'] = pd.to_datetime(hist_df['time'])
 
-    fig_history = go.Figure()
+    col_hist, col_scenario = st.columns([1.6, 1])
 
-    fig_history.add_hrect(y0=0, y1=25, fillcolor="rgba(46,160,67,0.04)", line_width=0)
-    fig_history.add_hrect(y0=25, y1=50, fillcolor="rgba(57,210,192,0.04)", line_width=0)
-    fig_history.add_hrect(y0=50, y1=75, fillcolor="rgba(210,153,34,0.04)", line_width=0)
-    fig_history.add_hrect(y0=75, y1=100, fillcolor="rgba(248,81,73,0.04)", line_width=0)
+    with col_hist:
+        fig_history = go.Figure()
 
-    fig_history.add_trace(go.Scatter(
-        x=hist_df['time'], y=hist_df['stress_score'],
-        mode='lines',
-        fill='tozeroy',
-        fillcolor="rgba(88,166,255,0.08)",
-        line=dict(color="#58A6FF", width=2),
-        name="Stress Score",
-        hovertemplate="%{x}<br>Stress: %{y:.1f}<extra></extra>"
-    ))
+        fig_history.add_hrect(y0=0, y1=25, fillcolor="rgba(46,160,67,0.04)", line_width=0)
+        fig_history.add_hrect(y0=25, y1=50, fillcolor="rgba(57,210,192,0.04)", line_width=0)
+        fig_history.add_hrect(y0=50, y1=75, fillcolor="rgba(210,153,34,0.04)", line_width=0)
+        fig_history.add_hrect(y0=75, y1=100, fillcolor="rgba(248,81,73,0.04)", line_width=0)
 
-    if len(hist_df) > 0:
-        last_point = hist_df.iloc[-1]
         fig_history.add_trace(go.Scatter(
-            x=[last_point['time']], y=[last_point['stress_score']],
-            mode='markers',
-            marker=dict(size=10, color=regime_color, line=dict(width=2, color='white')),
-            showlegend=False,
-            hoverinfo='skip'
+            x=hist_df['time'], y=hist_df['stress_score'],
+            mode='lines',
+            fill='tozeroy',
+            fillcolor="rgba(88,166,255,0.08)",
+            line=dict(color="#58A6FF", width=2),
+            name="Stress Score",
+            hovertemplate="%{x}<br>Stress: %{y:.1f}<extra></extra>"
         ))
 
-    fig_history.add_hline(y=50, line_dash="dash", line_color="#D29922",
-                         annotation_text="Caution Threshold",
-                         annotation_font=dict(size=10, color="#D29922"),
-                         annotation_position="bottom right")
-    fig_history.add_hline(y=75, line_dash="dash", line_color="#F85149",
-                         annotation_text="Danger Threshold",
-                         annotation_font=dict(size=10, color="#F85149"),
-                         annotation_position="bottom right")
+        if len(hist_df) > 0:
+            last_point = hist_df.iloc[-1]
+            fig_history.add_trace(go.Scatter(
+                x=[last_point['time']], y=[last_point['stress_score']],
+                mode='markers',
+                marker=dict(size=10, color=regime_color, line=dict(width=2, color='white')),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
 
-    apply_theme(fig_history, title_text="Weighted Stress Score Over Time",
-        yaxis=dict(**PLOTLY_AXIS['yaxis'], range=[0, 100]),
-        height=350, showlegend=False
-    )
-    st.plotly_chart(fig_history, use_container_width=True)
+        fig_history.add_hline(y=50, line_dash="dash", line_color="#D29922",
+                             annotation_text="Caution Threshold",
+                             annotation_font=dict(size=10, color="#D29922"),
+                             annotation_position="bottom right")
+        fig_history.add_hline(y=75, line_dash="dash", line_color="#F85149",
+                             annotation_text="Danger Threshold",
+                             annotation_font=dict(size=10, color="#F85149"),
+                             annotation_position="bottom right")
+
+        apply_theme(fig_history, title_text="Weighted Stress Score Over Time",
+            yaxis=dict(**PLOTLY_AXIS['yaxis'], range=[0, 100]),
+            height=400, showlegend=False
+        )
+        st.plotly_chart(fig_history, use_container_width=True)
+
+    with col_scenario:
+        CRISIS_SCENARIOS = {
+            "Dot-com 2000": {
+                "color": "#F0883E",
+                "months": [-12,-10,-8,-6,-4,-3,-2,-1,0,1,2,3,4,6,8,10,12],
+                "stress": [25, 30, 38, 45, 52, 58, 65, 72, 88, 82, 78, 70, 65, 58, 52, 48, 42],
+            },
+            "GFC 2008": {
+                "color": "#F85149",
+                "months": [-12,-10,-8,-6,-4,-3,-2,-1,0,1,2,3,4,6,8,10,12],
+                "stress": [30, 35, 42, 55, 62, 68, 75, 85, 95, 90, 82, 72, 65, 55, 48, 42, 38],
+            },
+            "Rate Hike 2022": {
+                "color": "#BC8CFF",
+                "months": [-12,-10,-8,-6,-4,-3,-2,-1,0,1,2,3,4,6,8,10,12],
+                "stress": [20, 28, 35, 45, 55, 60, 62, 65, 72, 68, 60, 55, 50, 42, 38, 35, 30],
+            },
+        }
+
+        fig_scenario = go.Figure()
+
+        fig_scenario.add_hrect(y0=0, y1=25, fillcolor="rgba(46,160,67,0.04)", line_width=0)
+        fig_scenario.add_hrect(y0=25, y1=50, fillcolor="rgba(57,210,192,0.04)", line_width=0)
+        fig_scenario.add_hrect(y0=50, y1=75, fillcolor="rgba(210,153,34,0.04)", line_width=0)
+        fig_scenario.add_hrect(y0=75, y1=100, fillcolor="rgba(248,81,73,0.04)", line_width=0)
+
+        for name, data in CRISIS_SCENARIOS.items():
+            fig_scenario.add_trace(go.Scatter(
+                x=data["months"], y=data["stress"],
+                mode='lines',
+                line=dict(color=data["color"], width=2, dash='dot'),
+                name=name,
+                hovertemplate=f"{name}<br>Month %{{x}}: %{{y:.0f}}<extra></extra>"
+            ))
+
+        fig_scenario.add_hline(y=stress_score, line_dash="solid", line_color=regime_color,
+                              annotation_text=f"Current: {stress_score:.1f}",
+                              annotation_font=dict(size=11, color=regime_color),
+                              annotation_position="top left")
+
+        fig_scenario.add_vline(x=0, line_dash="dash", line_color="#484F58",
+                              annotation_text="Peak",
+                              annotation_font=dict(size=9, color="#484F58"),
+                              annotation_position="top")
+
+        apply_theme(fig_scenario, title_text="Historical Crisis Overlay",
+            xaxis_title="Months from Crisis Peak",
+            yaxis=dict(**PLOTLY_AXIS['yaxis'], range=[0, 100]),
+            height=400,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                       font=dict(size=10, color="#8B949E"), bgcolor="rgba(0,0,0,0)")
+        )
+        st.plotly_chart(fig_scenario, use_container_width=True)
 else:
     st.info("歷史數據將在多次執行後開始顯示趨勢圖。首次執行已記錄第一筆資料。")
 
@@ -1427,7 +1555,7 @@ if avg_momentum != 0: growth_components.append(f"台系代工 {avg_momentum*100:
 growth_detail = "、".join(growth_components) if growth_components else "數據取得中"
 
 if "擴張期" in current_regime:
-    st.info(f"宏觀 14 因子均處於溫和區間，AI 基礎設施動能強勁（{growth_detail}）。Fed Funds {fed_funds:.2f}%、M2 YoY {m2_yoy:+.1f}%，資金環境健康。建議維持多頭配置。")
+    st.info(f"宏觀 15 因子均處於溫和區間，AI 基礎設施動能強勁（{growth_detail}）。Fed Funds {fed_funds:.2f}%、M2 YoY {m2_yoy:+.1f}%，資金環境健康。建議維持多頭配置。")
 elif "過熱期" in current_regime:
     st.warning(f"⚠️ AI 動能仍在支撐大盤（{growth_detail}），但「{worst_cluster_name}」群組壓力已達 {worst_cluster_avg:.0f}/100。最大單一風險源：**{primary_risk_name} ({risk_labels_zh[primary_risk_name]})** = {primary_risk_value:.0f}。"
                f"\n\n消費者信心 {consumer_sentiment:.0f}、失業率 {unemployment:.1f}%、NFCI {nfci:+.2f}。建議開始對沖風險。")
@@ -1457,6 +1585,6 @@ st.markdown("</div>", unsafe_allow_html=True)
 # Footer
 st.markdown(f"""
 <div style="text-align:center; padding:24px 0 8px 0; color:#30363D; font-size:0.7rem; font-family:'JetBrains Mono',monospace;">
-    AI Bubble Monitor v6.0 &nbsp;·&nbsp; Data delayed 15-20 min &nbsp;·&nbsp; Not financial advice &nbsp;·&nbsp; {datetime.datetime.utcnow().strftime('%Y-%m-%d')}
+    AI Bubble Monitor v7.0 &nbsp;·&nbsp; Data delayed 15-20 min &nbsp;·&nbsp; Not financial advice &nbsp;·&nbsp; {datetime.datetime.utcnow().strftime('%Y-%m-%d')}
 </div>
 """, unsafe_allow_html=True)

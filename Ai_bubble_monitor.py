@@ -369,8 +369,46 @@ def get_latest_price(ticker):
 @st.cache_data(ttl=1800)
 def get_ticker_info(ticker):
     try:
-        return yf.Ticker(ticker).info
-    except:
+        t = yf.Ticker(ticker)
+        info = {}
+        # Try .info first (full data)
+        try:
+            info = t.info or {}
+        except Exception:
+            pass
+        # If .info returned empty/minimal, supplement with fast_info
+        if not info.get('trailingPE'):
+            try:
+                fi = t.fast_info
+                price = getattr(fi, 'last_price', None)
+                mcap = getattr(fi, 'market_cap', None)
+                if mcap and not info.get('marketCap'):
+                    info['marketCap'] = mcap
+                # Derive P/E from earnings if available
+                if price:
+                    try:
+                        inc = t.income_stmt
+                        if inc is not None and 'NetIncome' in inc.index:
+                            net_income = float(inc.loc['NetIncome'].iloc[0])
+                            shares = getattr(fi, 'shares', None)
+                            if shares and shares > 0 and net_income > 0:
+                                eps = net_income / shares
+                                info.setdefault('trailingPE', price / eps)
+                        if inc is not None and 'TotalRevenue' in inc.index:
+                            revenue = float(inc.loc['TotalRevenue'].iloc[0])
+                            if mcap and revenue > 0:
+                                info.setdefault('priceToSalesTrailing12Months', mcap / revenue)
+                        if inc is not None and 'EBITDA' in inc.index:
+                            ebitda = float(inc.loc['EBITDA'].iloc[0])
+                            ev = getattr(fi, 'enterprise_value', None) or (mcap * 1.1 if mcap else None)
+                            if ev and ebitda > 0:
+                                info.setdefault('enterpriseToEbitda', ev / ebitda)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        return info
+    except Exception:
         return {}
 
 @st.cache_data(ttl=1800)
@@ -521,12 +559,12 @@ growth_score = min(100, max(-100, combined_growth * 1000))
 
 buffett_val = buffett_indicator if buffett_indicator else 130
 
-# JPY carry stress: rapid yen strengthening (USD/JPY dropping) = carry unwind = liquidity stress
-# Safe: stable at 150+, Danger: rapid drop to 130 (carry unwind territory)
-jpy_carry_stress = normalize(150 - usdjpy, 0, 20)
+# JPY liquidity stress: 日圓是國際主要借貸貨幣，日圓急升 = 借貸成本飆升 = 全球流動性緊縮
+# Safe: USD/JPY 穩定 150+, Danger: 急跌至 130 (流動性收縮區)
+jpy_liq_stress = normalize(150 - usdjpy, 0, 20)
 # Also factor in momentum: sharp yen strengthening amplifies stress
 if jpy_momentum < -0.03:
-    jpy_carry_stress = min(100, jpy_carry_stress + normalize(-jpy_momentum, 0.03, 0.10) * 0.3)
+    jpy_liq_stress = min(100, jpy_liq_stress + normalize(-jpy_momentum, 0.03, 0.10) * 0.3)
 
 risk_scores = {
     # Cluster A: 貨幣政策與流動性
@@ -534,7 +572,7 @@ risk_scores = {
     "Fed Funds Rate":   normalize(fed_funds, 3.0, 5.5),
     "Net Liquidity":    normalize(6200 - net_liquidity, 0, 800),
     "M2 Supply YoY":    normalize(-m2_yoy, -6, 2),
-    "JPY Carry":        jpy_carry_stress,
+    "JPY Liquidity":        jpy_liq_stress,
     # Cluster B: 信用與金融條件
     "Yield Curve":      normalize(latest_curve, -0.8, 0.2),
     "Credit Spread":    normalize(latest_spread, 3.0, 5.5),
@@ -555,7 +593,7 @@ risk_labels_zh = {
     "Fed Funds Rate":    "聯準會利率",
     "Net Liquidity":     "絕對資金",
     "M2 Supply YoY":     "貨幣供給",
-    "JPY Carry":         "日圓套利",
+    "JPY Liquidity":         "日圓流動性",
     "Yield Curve":       "衰退警報",
     "Credit Spread":     "違約風險",
     "NFCI":              "金融環境",
@@ -573,7 +611,7 @@ risk_cluster = {
     "Fed Funds Rate":    "A 貨幣流動性",
     "Net Liquidity":     "A 貨幣流動性",
     "M2 Supply YoY":     "A 貨幣流動性",
-    "JPY Carry":         "A 貨幣流動性",
+    "JPY Liquidity":         "A 貨幣流動性",
     "Yield Curve":       "B 信用條件",
     "Credit Spread":     "B 信用條件",
     "NFCI":              "B 信用條件",
@@ -592,7 +630,7 @@ weights = {
     "Fed Funds Rate":    0.07,
     "Net Liquidity":     0.07,
     "M2 Supply YoY":     0.05,
-    "JPY Carry":         0.07,
+    "JPY Liquidity":         0.07,
     # Cluster B: 19%
     "Yield Curve":       0.07,
     "Credit Spread":     0.06,
@@ -787,7 +825,7 @@ kpi_data_r1 = [
     ("US Dollar Index", f"{dxy:.2f}", risk_color(risk_scores["US Dollar"])),
     ("Net Liquidity", f"${net_liquidity/1000:.2f}T", risk_color(risk_scores["Net Liquidity"])),
     ("M2 Money YoY", f"{m2_yoy:+.1f}%", risk_color(risk_scores["M2 Supply YoY"])),
-    ("JPY 日圓套利", f"{usdjpy:.1f}", risk_color(risk_scores["JPY Carry"])),
+    ("JPY 日圓流動性", f"{usdjpy:.1f}", risk_color(risk_scores["JPY Liquidity"])),
     ("Yield Curve", f"{latest_curve:.2f}%", risk_color(risk_scores["Yield Curve"])),
     ("NFCI 金融環境", f"{nfci:+.2f}", risk_color(risk_scores["NFCI"])),
 ]
@@ -1150,7 +1188,6 @@ with col_gauges:
                                specs=[[{"type": "indicator"}], [{"type": "indicator"}]],
                                vertical_spacing=0.3)
 
-    buffett_val = buffett_indicator if buffett_indicator else 0
     fig_gauges.add_trace(go.Indicator(
         mode="gauge+number",
         value=buffett_val,

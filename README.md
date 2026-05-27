@@ -51,7 +51,7 @@ Organized into 4 clusters:
 | Fed Funds Rate | FRED: FEDFUNDS | 3.0% | 5.5% | 7% |
 | Net Liquidity (Fed B/S - TGA - RRP) | FRED: WALCL, WTREGEN, RRPONTSYD | $6.2T | $5.4T | 7% |
 | M2 Money Supply YoY | FRED: M2SL | +6% | -2% | 5% |
-| JPY Carry Trade Stress | Yahoo: JPY=X (USD/JPY + 20d momentum) | 150+ (stable) | 130 (unwind) | 7% |
+| JPY Liquidity Stress | Yahoo: JPY=X (USD/JPY + 20d momentum) | 150+ (stable) | 130 (liquidity crunch) | 7% |
 
 #### Cluster B: Credit & Financial Conditions (19%)
 

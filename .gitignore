@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+stress_history.json
+.claude/

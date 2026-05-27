@@ -446,10 +446,20 @@ if tnx_val: tnx_yield = tnx_val
 dxy_val = get_latest_price('DX-Y.NYB')
 if dxy_val: dxy = dxy_val
 
-# Put/Call ratio
+# Put/Call ratio (try multiple tickers)
+for pcr_ticker in ['^PCCE', '^CPCE']:
+    try:
+        pcr_val = get_latest_price(pcr_ticker)
+        if pcr_val:
+            put_call_ratio = pcr_val
+            break
+    except: pass
+
+# VIX (reliable fear gauge, used as fallback chart if P/C unavailable)
+vix = None
 try:
-    pcr_val = get_latest_price('^PCCE')
-    if pcr_val: put_call_ratio = pcr_val
+    vix_val = get_latest_price('^VIX')
+    if vix_val: vix = vix_val
 except: pass
 
 # 估值數據
@@ -1268,44 +1278,63 @@ with col_margin:
         st.info("保證金負債數據暫時無法取得 (FRED)")
 
 with col_pcr:
+    pcr_chart_done = False
     if put_call_ratio is not None:
+        for pcr_t in ['^PCCE', '^CPCE']:
+            try:
+                pcr_hist = yf.Ticker(pcr_t).history(period='6mo')['Close'].dropna()
+                if len(pcr_hist) > 5:
+                    fig_pcr = go.Figure()
+                    fig_pcr.add_trace(go.Scatter(
+                        x=pcr_hist.index, y=pcr_hist.values,
+                        mode='lines', fill='tozeroy',
+                        fillcolor="rgba(57,210,192,0.08)",
+                        line=dict(color="#39D2C0", width=2),
+                        name="Put/Call Ratio"
+                    ))
+                    fig_pcr.add_hline(y=1.0, line_dash="dash", line_color="#F85149",
+                                     annotation_text="Fear Zone (>1.0)",
+                                     annotation_font=dict(size=10, color="#F85149"))
+                    fig_pcr.add_hline(y=0.7, line_dash="dash", line_color="#2EA043",
+                                     annotation_text="Complacency (<0.7)",
+                                     annotation_font=dict(size=10, color="#2EA043"))
+                    apply_theme(fig_pcr, title_text="CBOE Equity Put/Call Ratio",
+                        height=380, showlegend=False
+                    )
+                    st.plotly_chart(fig_pcr, use_container_width=True)
+                    pcr_chart_done = True
+                    break
+            except Exception:
+                continue
+
+    if not pcr_chart_done:
         try:
-            pcr_hist = yf.Ticker('^PCCE').history(period='6mo')['Close'].dropna()
+            vix_hist = yf.Ticker('^VIX').history(period='6mo')['Close'].dropna()
+            if len(vix_hist) > 5:
+                fig_vix = go.Figure()
+                fig_vix.add_trace(go.Scatter(
+                    x=vix_hist.index, y=vix_hist.values,
+                    mode='lines', fill='tozeroy',
+                    fillcolor="rgba(248,81,73,0.08)",
+                    line=dict(color="#F85149", width=2),
+                    name="VIX"
+                ))
+                fig_vix.add_hline(y=20, line_dash="dash", line_color="#D29922",
+                                 annotation_text="Elevated (>20)",
+                                 annotation_font=dict(size=10, color="#D29922"))
+                fig_vix.add_hline(y=30, line_dash="dash", line_color="#F85149",
+                                 annotation_text="High Fear (>30)",
+                                 annotation_font=dict(size=10, color="#F85149"))
+                apply_theme(fig_vix, title_text="VIX Fear Index (Put/Call Unavailable)",
+                    height=380, showlegend=False
+                )
+                st.plotly_chart(fig_vix, use_container_width=True)
+                pcr_chart_done = True
+        except Exception:
+            pass
 
-            fig_pcr = go.Figure()
-            fig_pcr.add_trace(go.Scatter(
-                x=pcr_hist.index, y=pcr_hist.values,
-                mode='lines', fill='tozeroy',
-                fillcolor="rgba(57,210,192,0.08)",
-                line=dict(color="#39D2C0", width=2),
-                name="Put/Call Ratio"
-            ))
-
-            fig_pcr.add_hline(y=1.0, line_dash="dash", line_color="#F85149",
-                             annotation_text="Fear Zone (>1.0)",
-                             annotation_font=dict(size=10, color="#F85149"))
-            fig_pcr.add_hline(y=0.7, line_dash="dash", line_color="#2EA043",
-                             annotation_text="Complacency (<0.7)",
-                             annotation_font=dict(size=10, color="#2EA043"))
-
-            apply_theme(fig_pcr, title_text="CBOE Equity Put/Call Ratio",
-                height=380, showlegend=False
-            )
-            st.plotly_chart(fig_pcr, use_container_width=True)
-        except:
-            st.info("Put/Call Ratio 歷史圖表載入失敗，當前值: {:.3f}".format(put_call_ratio))
-    else:
-        fig_pcr_placeholder = go.Figure()
-        fig_pcr_placeholder.add_annotation(
-            text="Put/Call Ratio Data Unavailable<br>Will attempt ^PCCE from Yahoo Finance",
-            xref="paper", yref="paper", x=0.5, y=0.5,
-            showarrow=False, font=dict(size=14, color="#484F58")
-        )
-        apply_theme(fig_pcr_placeholder,
-            height=380,
-            xaxis=dict(visible=False), yaxis=dict(visible=False)
-        )
-        st.plotly_chart(fig_pcr_placeholder, use_container_width=True)
+    if not pcr_chart_done:
+        st.info("Put/Call Ratio 及 VIX 數據暫時無法取得")
 
 st.markdown("---")
 

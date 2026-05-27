@@ -100,17 +100,12 @@ st.markdown("""
     margin-top: 4px;
 }
 
-/* KPI Cards */
+/* KPI Cards (legacy st.metric styling kept for other metrics) */
 div[data-testid="stMetric"] {
     background: #161B22 !important;
     border: 1px solid #21262D !important;
     border-radius: 10px !important;
     padding: 18px 20px !important;
-    transition: border-color 0.2s ease, transform 0.15s ease;
-}
-div[data-testid="stMetric"]:hover {
-    border-color: #30363D !important;
-    transform: translateY(-1px);
 }
 div[data-testid="stMetric"] label {
     color: #8B949E !important;
@@ -123,7 +118,6 @@ div[data-testid="stMetric"] [data-testid="stMetricValue"] {
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 1.4rem !important;
     font-weight: 600 !important;
-    color: #E6EDF3 !important;
 }
 
 /* Section Headers */
@@ -693,33 +687,57 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- KPI Cards Row 1 ---
-kpi_r1 = st.columns(7)
-kpi_data_r1 = [
-    ("10Y TREASURY", f"{tnx_yield:.2f}%"),
-    ("FED FUNDS", f"{fed_funds:.2f}%"),
-    ("US DOLLAR", f"{dxy:.2f}"),
-    ("NET LIQUIDITY", f"${net_liquidity/1000:.2f}T"),
-    ("M2 YoY", f"{m2_yoy:+.1f}%"),
-    ("YIELD CURVE", f"{latest_curve:.2f}%"),
-    ("NFCI", f"{nfci:+.2f}"),
-]
-for i, (label, value) in enumerate(kpi_data_r1):
-    kpi_r1[i].metric(label, value)
+def risk_color(score):
+    if score < 30:
+        return "#E6EDF3"
+    elif score < 65:
+        return "#D29922"
+    else:
+        return "#F85149"
 
-# --- KPI Cards Row 2 ---
-kpi_r2 = st.columns(7)
-kpi_data_r2 = [
-    ("CREDIT SPREAD", f"{latest_spread:.2f}%"),
-    ("VXN INDEX", f"{vxn:.1f}"),
-    ("UNEMPLOYMENT", f"{unemployment:.1f}%"),
-    ("CONSUMER SENT.", f"{consumer_sentiment:.0f}"),
-    ("SOX MOMENTUM", f"{sox_momentum*100:+.1f}%"),
-    ("BTC MOMENTUM", f"{btc_momentum*100:+.1f}%"),
-    ("BUFFETT IND.", f"{buffett_val:.0f}%"),
+def kpi_card(label, value, color="#E6EDF3"):
+    return f"""
+    <div style="background:#161B22; border:1px solid #21262D; border-radius:10px;
+                padding:14px 12px; text-align:center; min-height:90px;
+                display:flex; flex-direction:column; justify-content:center;">
+        <div style="color:#8B949E; font-size:0.65rem; font-weight:500;
+                    text-transform:uppercase; letter-spacing:0.06em;
+                    margin-bottom:6px; line-height:1.3; word-wrap:break-word;">
+            {label}
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:1.25rem;
+                    font-weight:600; color:{color};">
+            {value}
+        </div>
+    </div>"""
+
+kpi_data_r1 = [
+    ("10Y Treasury", f"{tnx_yield:.2f}%", risk_color(risk_scores["10Y Treasury"])),
+    ("Fed Funds Rate", f"{fed_funds:.2f}%", risk_color(risk_scores["Fed Funds Rate"])),
+    ("US Dollar Index", f"{dxy:.2f}", risk_color(risk_scores["US Dollar"])),
+    ("Net Liquidity", f"${net_liquidity/1000:.2f}T", risk_color(risk_scores["Net Liquidity"])),
+    ("M2 Money YoY", f"{m2_yoy:+.1f}%", risk_color(risk_scores["M2 Supply YoY"])),
+    ("Yield Curve", f"{latest_curve:.2f}%", risk_color(risk_scores["Yield Curve"])),
+    ("NFCI 金融環境", f"{nfci:+.2f}", risk_color(risk_scores["NFCI"])),
 ]
-for i, (label, value) in enumerate(kpi_data_r2):
-    kpi_r2[i].metric(label, value)
+
+kpi_data_r2 = [
+    ("Credit Spread", f"{latest_spread:.2f}%", risk_color(risk_scores["Credit Spread"])),
+    ("VXN 波動指數", f"{vxn:.1f}", risk_color(risk_scores["VXN Volatility"])),
+    ("Unemployment", f"{unemployment:.1f}%", risk_color(risk_scores["Unemployment"])),
+    ("消費者信心", f"{consumer_sentiment:.0f}", risk_color(risk_scores["Consumer Sentiment"])),
+    ("SOX Momentum", f"{sox_momentum*100:+.1f}%", "#2EA043" if sox_momentum > 0 else ("#D29922" if sox_momentum > -0.05 else "#F85149")),
+    ("BTC Momentum", f"{btc_momentum*100:+.1f}%", "#2EA043" if btc_momentum > 0 else ("#D29922" if btc_momentum > -0.05 else "#F85149")),
+    ("Buffett Indicator", f"{buffett_val:.0f}%", risk_color(risk_scores["Buffett Indicator"])),
+]
+
+cols_r1 = st.columns(7)
+for i, (label, value, color) in enumerate(kpi_data_r1):
+    cols_r1[i].markdown(kpi_card(label, value, color), unsafe_allow_html=True)
+
+cols_r2 = st.columns(7)
+for i, (label, value, color) in enumerate(kpi_data_r2):
+    cols_r2[i].markdown(kpi_card(label, value, color), unsafe_allow_html=True)
 
 st.markdown("---")
 

@@ -329,11 +329,15 @@ def todays_events(sig: pd.DataFrame, fwd: pd.DataFrame, hold_days: int = HOLD_DA
         if today[col] and not recent.any():
             starts = episode_starts(stats_sig[col])[:-1]  # exclude today
             f = stats_fwd.reindex(starts).dropna(subset=["ret_252"])
+            if len(f):
+                history = (f"{STATS_START[:4]} 年以來 {len(f)} 次：12 個月後上漲 {(f['ret_252'] > 0).sum()} 次、"
+                           f"平均 {f['ret_252'].mean():+.1%}；訊號後 6 個月內平均再跌 {f['lowest_126'].mean():.1%}、"
+                           f"最多再跌 {f['lowest_126'].min():.1%}。")
+            else:
+                history = f"{STATS_START[:4]} 年以來這個指數還沒有可比較的先例，沒有歷史勝率可參考。"
             events.append(SignalEvent(
                 f"entry-{name}-{date}", "entry", f"進場訊號：{label.split('：')[0]}",
-                f"{label}。目前距一年高點 {today['dd_1y']:+.1%}，VIX {today['vix']:.1f}。\n"
-                f"{STATS_START[:4]} 年以來 {len(f)} 次：12 個月後上漲 {(f['ret_252'] > 0).sum()} 次、平均 {f['ret_252'].mean():+.1%}；"
-                f"訊號後 6 個月內平均再跌 {f['lowest_126'].mean():.1%}、最多再跌 {f['lowest_126'].min():.1%}。\n"
+                f"{label}。目前距一年高點 {today['dd_1y']:+.1%}，VIX {today['vix']:.1f}。\n{history}\n"
                 "訊號不代表就是最低點，歷史上常在訊號後再探底，分批進場較能承受。",
             ))
     return events

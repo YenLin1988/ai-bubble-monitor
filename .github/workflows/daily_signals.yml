@@ -28,6 +28,7 @@ jobs:
         env:
           ALERTS_ENABLED: ${{ secrets.ALERTS_ENABLED }}
           ALERT_MIN_WARNING_LEVEL: ${{ vars.ALERT_MIN_WARNING_LEVEL }}
+          ALERT_INDEX: ${{ vars.ALERT_INDEX }}
           ALERT_DISCORD_WEBHOOK_URL: ${{ secrets.ALERT_DISCORD_WEBHOOK_URL }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           ALERT_EMAIL_SMTP_HOST: ${{ secrets.ALERT_EMAIL_SMTP_HOST }}

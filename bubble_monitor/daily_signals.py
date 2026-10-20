@@ -46,7 +46,7 @@ WARNING_CONDITIONS = {
     "credit": "信用利差 20 日擴大 ≥0.40 個百分點",
     "breadth": "小型股 60 日落後大盤 ≥5%",
     "vol": "VIX 期限結構逼近倒掛（VIX/VIX3M ≥0.95）",
-    "trend": "S&P 500 跌破 50 日均線",
+    "trend": "指數跌破 50 日均線",
     "curve": "殖利率曲線倒掛後重新轉正",
 }
 ENTRY_SIGNALS = {
@@ -88,14 +88,21 @@ def build_daily_frame(raw: Mapping[str, pd.Series]) -> pd.DataFrame:
     }, index=idx)
 
 
-def compute_signals(d: pd.DataFrame) -> pd.DataFrame:
+def compute_signals(d: pd.DataFrame, target: pd.Series | None = None) -> pd.DataFrame:
+    """Warning and entry signals for ``target`` (default: the S&P 500 in ``d``).
+
+    Index-specific parts (distance from high, 50-day trend, decline thresholds) use
+    ``target``; market-wide inputs (credit, small-cap breadth vs the S&P 500, VIX,
+    yield curve) are the same whichever index is targeted.
+    """
     out = pd.DataFrame(index=d.index)
     spx = d["spx"]
-    high_1y = spx.rolling(TRADING_DAYS_YEAR, min_periods=20).max()
-    out["dd_1y"] = spx / high_1y - 1
-    out["dd_ath"] = spx / spx.cummax() - 1
+    px = spx if target is None else target.reindex(d.index).ffill(limit=2)
+    high_1y = px.rolling(TRADING_DAYS_YEAR, min_periods=20).max()
+    out["dd_1y"] = px / high_1y - 1
+    out["dd_ath"] = px / px.cummax() - 1
     out["vix"] = d["vix"]
-    sma50 = spx.rolling(50, min_periods=50).mean()
+    sma50 = px.rolling(50, min_periods=50).mean()
 
     # --- early warning ---
     spread_chg = d["spread"] - d["spread"].shift(20)
@@ -109,7 +116,7 @@ def compute_signals(d: pd.DataFrame) -> pd.DataFrame:
     cond["credit"] = spread_chg >= 0.40
     cond["breadth"] = rel_chg <= -0.05
     cond["vol"] = np.where(ts.notna(), ts >= 0.95, vix_vs_avg >= 1.3)
-    cond["trend"] = spx < sma50
+    cond["trend"] = px < sma50
     cond["curve"] = (d["curve"] > 0) & (curve_min < 0)
     # Unknown inputs count as "not triggered" but are tracked in coverage.
     known = pd.DataFrame({
@@ -361,7 +368,8 @@ def position_frame(spx: pd.Series, sig: pd.DataFrame, warning_level: int = 4) ->
     return out
 
 
-def position_events(pos: pd.DataFrame, date_label: str) -> list[SignalEvent]:
+def position_events(pos: pd.DataFrame, date_label: str,
+                    evidence: str = "S&P 500 1990–2026：年化報酬與一直持有相近、最大回撤 -21% 對 -55%") -> list[SignalEvent]:
     if len(pos) < 2:
         return []
     today, prev = pos.iloc[-1], pos.iloc[-2]
@@ -378,8 +386,7 @@ def position_events(pos: pd.DataFrame, date_label: str) -> list[SignalEvent]:
         events.append(SignalEvent(
             f"position-{date_label}-{today['target']:.2f}", "position",
             f"規則部位調整：{prev['target']:.0%} → {today['target']:.0%}",
-            "依回測過的「均線 × 警示 + 恐慌進場」規則（美國 1990–2026：年化報酬與一直持有相近、"
-            "最大回撤 -21% 對 -55%；8 個海外市場夏普值全部變好）。照規則在今天收盤調整。"
+            f"依回測過的「均線 × 警示 + 恐慌進場」規則（{evidence}）。照規則在今天收盤調整。"
             "這是規則的機械輸出，不是投資建議。",
         ))
     return events

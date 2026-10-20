@@ -32,6 +32,18 @@ class WarningTests(unittest.TestCase):
         self.assertFalse(last["w_vol"])
         self.assertEqual(int(last["warning_level"]), 2)
 
+    def test_target_index_drives_drawdown_and_trend_only(self):
+        n = 300
+        spx = np.linspace(100, 130, n)
+        spread = np.r_[np.full(n - 20, 3.0), np.linspace(3.0, 3.6, 20)]
+        d = _frame(spx, spread=spread)
+        tech = pd.Series(np.r_[np.linspace(100, 160, n - 20), np.linspace(160, 130, 20)], index=d.index)
+        base, on_tech = ds.compute_signals(d), ds.compute_signals(d, tech)
+        self.assertAlmostEqual(on_tech["dd_1y"].iloc[-1], 130 / 160 - 1)
+        self.assertTrue(on_tech["w_trend"].iloc[-1])
+        self.assertFalse(base["w_trend"].iloc[-1])
+        self.assertEqual(base["w_credit"].iloc[-1], on_tech["w_credit"].iloc[-1])  # market-wide input
+
     def test_curve_condition_needs_prior_inversion(self):
         curve = np.r_[np.full(100, -0.3), np.full(200, 0.4)]
         sig = ds.compute_signals(_frame(np.linspace(100, 130, 300), curve=curve))

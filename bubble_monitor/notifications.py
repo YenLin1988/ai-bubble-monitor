@@ -58,7 +58,7 @@ def dispatch_alerts(alerts: Iterable[Alert], env: dict[str, str] | None = None) 
 
 
 def format_alert_message(alerts: Iterable[Alert]) -> str:
-    lines = ["AI Bubble Monitor alert"]
+    lines = ["美股警示"]
     for alert in alerts:
         lines.append(f"[{alert.severity.upper()}] {alert.title}: {alert.message}")
     return "\n".join(lines)

@@ -2,7 +2,7 @@ name: Daily Early Warning & Entry Signals
 
 on:
   schedule:
-    # 22:00 UTC Mon-Fri = after the US close (17:00/18:00 New York)
+    # 22:00 UTC Mon-Fri = after the US close (17:00/18:00 New York). The Friday run also sends the weekly summary.
     - cron: '0 22 * * 1-5'
   workflow_dispatch:
     inputs:
@@ -10,6 +10,18 @@ on:
         description: 'Also send today''s status message'
         type: boolean
         default: false
+      weekly:
+        description: 'Also send the weekly summary'
+        type: boolean
+        default: false
+
+# Needed to commit the forward-test log (data/signal_log.csv) back to the repository.
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-signals
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -37,4 +49,20 @@ jobs:
           ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
           ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
-        run: python scripts/daily_alert.py ${{ inputs.status && '--status' || '' }}
+        run: >-
+          python scripts/daily_alert.py
+          ${{ inputs.status && '--status' || '' }}
+          ${{ inputs.weekly && '--weekly' || '' }}
+
+      - name: Save forward-test log
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/signal_log.csv
+          if git diff --cached --quiet; then
+            echo "Log unchanged"
+          else
+            git commit -m "Log daily signals $(date -u +%Y-%m-%d)"
+            git pull --rebase
+            git push
+          fi

@@ -17,7 +17,10 @@ def load_fred(series_id: str) -> pd.Series:
 def load_yahoo(ticker: str) -> pd.Series:
     import yfinance as yf
 
-    close = yf.Ticker(ticker).history(period="max", auto_adjust=False)["Close"].dropna()
+    hist = yf.Ticker(ticker).history(period="max", auto_adjust=False)
+    if hist.empty or "Close" not in hist:
+        raise ValueError(f"Yahoo returned no price history for {ticker}")
+    close = hist["Close"].dropna()
     close.index = close.index.tz_localize(None).normalize()
     return close
 

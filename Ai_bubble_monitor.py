@@ -528,17 +528,31 @@ btc_momentum = get_20d_momentum(['BTC-USD'])
 capex_data = get_hyperscaler_capex()
 data_quality.record_value("Hyperscaler CapEx", "Yahoo Finance cashflow statements", capex_data if capex_data else None)
 
-# Buffett Indicator
+# Buffett Indicator: FRED dropped WILL5000PR, so use the Fed Z.1 market value of corporate
+# equities (quarterly, millions USD), rolled forward to today with the S&P 500, divided by GDP.
+@st.cache_data(ttl=3600)
+def get_spx_closes(start):
+    try:
+        hist = yf.Ticker('^GSPC').history(start=start)['Close'].dropna()
+        hist.index = hist.index.tz_localize(None)
+        return hist
+    except Exception:
+        return None
+
 buffett_indicator = None
 try:
-    wilshire_df = fred_data.get('wilshire')
+    equity_df = fred_data.get('corp_equity')
     gdp_df = fred_data.get('gdp')
-    if wilshire_df is not None and gdp_df is not None:
-        latest_wilshire = float(wilshire_df.iloc[-1, 1])
-        latest_gdp = float(gdp_df.iloc[-1, 1])
-        buffett_indicator = (latest_wilshire / latest_gdp) * 100
-except: pass
-data_quality.record_value("Buffett Indicator", "FRED WILL5000PR / GDP", buffett_indicator)
+    if equity_df is not None and gdp_df is not None:
+        quarter_start = pd.Timestamp(equity_df.iloc[-1, 0])
+        quarter_end = quarter_start + pd.DateOffset(months=3) - pd.Timedelta(days=1)
+        spx_hist = get_spx_closes((quarter_end - pd.Timedelta(days=10)).strftime('%Y-%m-%d'))
+        spx_scale = float(spx_hist.iloc[-1] / spx_hist.asof(quarter_end))
+        equity_now_bn = float(equity_df.iloc[-1, 1]) / 1000 * spx_scale
+        buffett_indicator = equity_now_bn / float(gdp_df.iloc[-1, 1]) * 100
+except Exception:
+    pass
+data_quality.record_value("Buffett Indicator", "FRED NCBEILQ027S x S&P 500 / GDP", buffett_indicator)
 
 # =============================================================
 # 2. 加權評估系統
@@ -864,6 +878,86 @@ with st.expander("Data source status and model methodology", expanded=False):
 
     st.markdown("#### AI Growth Momentum Components")
     st.dataframe(pd.DataFrame(GROWTH_COMPONENTS), use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# =============================================================
+# 每日早期警示與進場訊號（與每日 Email 同一套規則）
+# =============================================================
+st.markdown("## DAILY EARLY WARNING & ENTRY SIGNALS")
+st.markdown("<p style='color:#8B949E; font-size:0.8rem; margin-top:-10px;'>與每日 Email 通知相同的規則；"
+            "回測與前向測試細節見 reports/ 與 data/signal_log.csv</p>", unsafe_allow_html=True)
+
+
+@st.cache_data(ttl=3600)
+def load_daily_signals(index_key):
+    from pathlib import Path
+    from bubble_monitor import daily_signals as ds
+    from bubble_monitor import signal_log
+    from bubble_monitor.health import load_with_health
+
+    raw, problems = load_with_health(
+        {"hy": "BAMLH0A0HYM2", "baa10y": "BAA10Y", "t10y2y": "T10Y2Y"},
+        {"spx": "^GSPC", "ndx": "^NDX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"},
+        None, 0)
+    if any(k not in raw for k in ("spx", "baa10y", index_key)):
+        return None, problems
+    d = ds.build_daily_frame(raw)
+    target = raw[index_key].reindex(d.index).ffill(limit=2)
+    sig = ds.compute_signals(d, None if index_key == "spx" else raw[index_key])
+    t = target.dropna()
+    pos = ds.position_frame(t, sig.loc[t.index])
+    log_path = Path(__file__).resolve().parent / "data" / "signal_log.csv"
+    card = signal_log.scorecard_text(
+        signal_log.scorecard(signal_log.read_log(log_path), index_key, target),
+        "那斯達克 100" if index_key == "ndx" else "S&P 500")
+    return {
+        "sig": sig.iloc[-520:], "price": target.iloc[-520:], "target": pos["target"].iloc[-520:],
+        "trend": float(pos["trend"].iloc[-1]), "ma10_gap": pos.attrs["price"] / pos.attrs["ma10_provisional"] - 1,
+        "conditions": ds.WARNING_CONDITIONS, "entries": ds.ENTRY_SIGNALS, "level_names": ds.WARNING_LEVEL_NAMES,
+        "card": card,
+    }, problems
+
+
+sig_index = st.radio("指數", ["ndx", "spx"], horizontal=True,
+                     format_func=lambda k: "那斯達克 100" if k == "ndx" else "S&P 500")
+daily, daily_problems = load_daily_signals(sig_index)
+for problem in daily_problems:
+    st.warning(f"資料問題：{problem}")
+if daily is None:
+    st.error("缺少必要資料，今天無法計算每日訊號。")
+else:
+    today_sig = daily["sig"].iloc[-1]
+    lvl = int(today_sig["warning_level"])
+    d_cols = st.columns(4)
+    d_cols[0].metric("距一年高點", f"{today_sig['dd_1y']:+.1%}")
+    d_cols[1].metric("早期警示", f"{daily['level_names'][lvl]} {lvl}/5")
+    d_cols[2].metric("10 個月均線", "上方" if daily["trend"] >= 1 else "下方", f"{daily['ma10_gap']:+.1%}（預估）")
+    d_cols[3].metric("規則部位", f"{daily['target'].iloc[-1]:.0%}")
+
+    c_left, c_right = st.columns([1, 1.6])
+    with c_left:
+        st.markdown("**早期警示條件**")
+        for c, label in daily["conditions"].items():
+            st.markdown(f"{'🔴' if today_sig[f'w_{c}'] else '⚪'} {label}")
+        st.markdown("**進場訊號**")
+        for k, label in daily["entries"].items():
+            st.markdown(f"{'🟢' if today_sig[f'e_{k}'] else '⚪'} {label}")
+        st.caption(daily["card"].replace("\n", "  \n"))
+    with c_right:
+        fig_sig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.55, 0.25, 0.2], vertical_spacing=0.04)
+        fig_sig.add_trace(go.Scatter(x=daily["price"].index, y=daily["price"].values, name="指數",
+                                     line=dict(color="#58A6FF", width=1.5)), row=1, col=1)
+        levels = daily["sig"]["warning_level"].where(daily["sig"]["near_high"], 0)
+        fig_sig.add_trace(go.Bar(x=levels.index, y=levels.values, name="警示條件數", marker_line_width=0,
+                                 marker_color=["#F85149" if v >= 3 else ("#D29922" if v == 2 else "#30363D") for v in levels.values]),
+                          row=2, col=1)
+        fig_sig.add_trace(go.Scatter(x=daily["target"].index, y=daily["target"].values * 100, name="規則部位 %",
+                                     line=dict(color="#2EA043", width=1.5, shape="hv")), row=3, col=1)
+        apply_theme(fig_sig, height=420, showlegend=False, bargap=0)
+        fig_sig.update_yaxes(range=[0, 5], row=2, col=1)
+        fig_sig.update_yaxes(range=[-5, 105], row=3, col=1)
+        st.plotly_chart(fig_sig, use_container_width=True)
 
 st.markdown("---")
 

@@ -66,7 +66,7 @@ Organized into 4 clusters:
 | Factor | Source | Safe | Danger | Weight |
 |--------|--------|------|--------|--------|
 | AI Sector EV/EBITDA | Yahoo Finance (NVDA, MSFT, META, GOOG, AMZN) | 25x | 45x | 7% |
-| Buffett Indicator | FRED: WILL5000PR / GDP | 100% | 200% | 6% |
+| Buffett Indicator | FRED: NCBEILQ027S (Z.1 corporate equity, scaled to today by S&P 500) / GDP | 100% | 200% | 6% |
 | VXN (Nasdaq Volatility) | Yahoo: ^VXN | 15 | 35 | 5% |
 | U. Michigan Consumer Sentiment | FRED: UMCSENT | 70+ | <30 | 6% |
 
@@ -133,6 +133,8 @@ External dispatch is disabled by default. Copy `.env.example`, set the channel c
 **Entry** (after a 15%+ decline) — *capitulation*: VIX spiked ≥ 35 and has fallen 20% from the spike; *combo*: at least two of {capitulation, HY spreads stop widening after a ≥1pp surge, VIX term structure back to contango} within 20 days. Candidate bottom signals (Coppock, weekly RSI, credit peak, VIX term structure, combo) are compared on 1990–2007 vs 2008–2026 by `python scripts/run_bottom_study.py` → `reports/bottom_study.html`.
 
 **Rule position** — the daily status also reports the Faber 10-month-average state (decided on completed months only) and the exposure of the "trend × warning + capitulation re-entry" rule. In `python scripts/run_overlay_study.py` (→ `reports/overlay_study.html`) that rule matched buy-and-hold's return on the S&P 500 total-return index since 1990 with a -21% vs -55% max drawdown, and improved Sharpe in all 8 foreign markets tested. A notice is sent when the trend flips or the rule exposure changes.
+
+**Reliability & forward test** — the scheduled Friday run also emails a weekly summary (this week's signal changes, current status, data health). If that email does not arrive, the pipeline has stopped. Failed or stale data sources trigger a "資料異常" alert, and a run that lacks essential data fails loudly. Every run appends that day's signals to `data/signal_log.csv` (committed back by the workflow); the weekly summary grades those logged signals against later prices, which is the only out-of-sample check that hindsight cannot touch.
 
 Every message includes the signal's historical hit rate since 1990. Rules were fixed before backtesting. Historical results: `python scripts/run_signal_backtest.py` → `reports/signals_report.html`. Model backtest (v1 vs v2): `python scripts/run_backtest.py` → `reports/backtest_report.html`.
 

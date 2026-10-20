@@ -17,7 +17,7 @@ FRED_SERIES = {
     "tga": "WTREGEN",
     "rrp": "RRPONTSYD",
     "margin_debt": "BOGZ1FL663067003Q",
-    "wilshire": "WILL5000PR",
+    "corp_equity": "NCBEILQ027S",
     "gdp": "GDP",
     "fedfunds": "FEDFUNDS",
     "m2": "M2SL",
@@ -155,7 +155,7 @@ FACTOR_METHODOLOGY = [
     },
     {
         "factor": "Buffett Indicator",
-        "source": "FRED WILL5000PR / GDP",
+        "source": "FRED NCBEILQ027S (Z.1 corporate equity, scaled by S&P 500) / GDP",
         "safe": "100%",
         "danger": "200%",
         "weight": "6%",

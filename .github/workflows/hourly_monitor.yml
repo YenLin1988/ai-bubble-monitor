@@ -1,8 +1,8 @@
 name: AI Bubble Hourly Monitor
 
+# The hourly schedule was removed: running the Streamlit page headless did no useful work.
+# Daily signals and email alerts run in daily_signals.yml. Kept for manual runs only.
 on:
-  schedule:
-    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:

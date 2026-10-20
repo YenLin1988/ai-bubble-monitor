@@ -71,7 +71,9 @@ def main() -> None:
     sig = ds.compute_signals(d)
     fwd = ds.forward_outcomes(d["spx"])
 
-    events = ds.todays_events(sig, fwd, min_warning_level=int(os.environ.get("ALERT_MIN_WARNING_LEVEL", "3")))
+    # GitHub Actions passes unset variables as empty strings, so fall back on "" too.
+    min_level = int(os.environ.get("ALERT_MIN_WARNING_LEVEL") or "3")
+    events = ds.todays_events(sig, fwd, min_warning_level=min_level)
     pos = ds.position_frame(d["spx"], sig)
     events += ds.position_events(pos, f"{sig.index[-1]:%Y-%m-%d}")
     status = status_text(sig, pos)

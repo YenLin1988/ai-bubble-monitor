@@ -67,12 +67,12 @@ def format_alert_message(alerts: Iterable[Alert]) -> str:
 def _send_email(message: str, env: dict[str, str], subject: str | None = None) -> dict[str, str]:
     msg = EmailMessage()
     msg["Subject"] = subject or env.get("ALERT_EMAIL_SUBJECT", "美股警示")
-    msg["From"] = env.get("ALERT_EMAIL_FROM", env.get("ALERT_EMAIL_USER", "ai-bubble-monitor@localhost"))
+    msg["From"] = env.get("ALERT_EMAIL_FROM") or env.get("ALERT_EMAIL_USER") or "ai-bubble-monitor@localhost"
     msg["To"] = env["ALERT_EMAIL_TO"]
     msg.set_content(message)
 
     host = env["ALERT_EMAIL_SMTP_HOST"]
-    port = int(env.get("ALERT_EMAIL_SMTP_PORT", "587"))
+    port = int(env.get("ALERT_EMAIL_SMTP_PORT") or "587")
     user = env.get("ALERT_EMAIL_USER")
     password = env.get("ALERT_EMAIL_PASSWORD")
     use_tls = env.get("ALERT_EMAIL_TLS", "1") != "0"

@@ -1,0 +1,39 @@
+name: Daily Early Warning & Entry Signals
+
+on:
+  schedule:
+    # 22:00 UTC Mon-Fri = after the US close (17:00/18:00 New York)
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      status:
+        description: 'Also send today''s status message'
+        type: boolean
+        default: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily signal check
+        env:
+          ALERTS_ENABLED: ${{ secrets.ALERTS_ENABLED }}
+          ALERT_MIN_WARNING_LEVEL: ${{ vars.ALERT_MIN_WARNING_LEVEL }}
+          ALERT_DISCORD_WEBHOOK_URL: ${{ secrets.ALERT_DISCORD_WEBHOOK_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_EMAIL_SMTP_HOST: ${{ secrets.ALERT_EMAIL_SMTP_HOST }}
+          ALERT_EMAIL_SMTP_PORT: ${{ secrets.ALERT_EMAIL_SMTP_PORT }}
+          ALERT_EMAIL_USER: ${{ secrets.ALERT_EMAIL_USER }}
+          ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: python scripts/daily_alert.py ${{ inputs.status && '--status' || '' }}

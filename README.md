@@ -124,6 +124,24 @@ External dispatch is disabled by default. Copy `.env.example`, set the channel c
 
 ---
 
+## Daily Early Warning & Entry Signals
+
+`scripts/daily_alert.py` checks the S&P 500 once per trading day (GitHub Actions: `daily_signals.yml`, 22:00 UTC Mon–Fri) and pushes to Email / Discord / webhook when a signal changes.
+
+**Early warning** (market within 10% of its 1-year high) — count of 5 conditions: HY spread +0.40pp in 20 days, small caps lagging 5%+ over 60 days, VIX/VIX3M ≥ 0.95, S&P 500 below its 50-day average, yield curve re-steepened after an inversion. Pushes at ≥ `ALERT_MIN_WARNING_LEVEL` (default 3), held for 5 trading days to avoid flip-flopping.
+
+**Entry** (after a 15%+ decline) — *capitulation*: VIX spiked ≥ 35 and has fallen 20% from the spike; *combo*: at least two of {capitulation, HY spreads stop widening after a ≥1pp surge, VIX term structure back to contango} within 20 days. Candidate bottom signals (Coppock, weekly RSI, credit peak, VIX term structure, combo) are compared on 1990–2007 vs 2008–2026 by `python scripts/run_bottom_study.py` → `reports/bottom_study.html`.
+
+**Rule position** — the daily status also reports the Faber 10-month-average state (decided on completed months only) and the exposure of the "trend × warning + capitulation re-entry" rule. In `python scripts/run_overlay_study.py` (→ `reports/overlay_study.html`) that rule matched buy-and-hold's return on the S&P 500 total-return index since 1990 with a -21% vs -55% max drawdown, and improved Sharpe in all 8 foreign markets tested. A notice is sent when the trend flips or the rule exposure changes.
+
+Every message includes the signal's historical hit rate since 1990. Rules were fixed before backtesting. Historical results: `python scripts/run_signal_backtest.py` → `reports/signals_report.html`. Model backtest (v1 vs v2): `python scripts/run_backtest.py` → `reports/backtest_report.html`.
+
+```bash
+python scripts/daily_alert.py --status --dry-run   # show today's state without sending
+```
+
+---
+
 ## Tech Stack
 
 - **Frontend**: [Streamlit](https://streamlit.io/) with custom institutional dark theme

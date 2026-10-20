@@ -38,7 +38,9 @@ def dispatch_alerts(alerts: Iterable[Alert], env: dict[str, str] | None = None) 
 
     if "email" in enabled_channels(env):
         try:
-            results.append(_send_email(message, env))
+            prefix = env.get("ALERT_EMAIL_SUBJECT", "美股警示")
+            subject = f"{prefix}：{alerts[0].title}" + (f"（另 {len(alerts) - 1} 則）" if len(alerts) > 1 else "")
+            results.append(_send_email(message, env, subject))
         except Exception as exc:
             results.append({"channel": "email", "status": f"error: {exc}"})
     if "discord" in enabled_channels(env):
@@ -62,9 +64,9 @@ def format_alert_message(alerts: Iterable[Alert]) -> str:
     return "\n".join(lines)
 
 
-def _send_email(message: str, env: dict[str, str]) -> dict[str, str]:
+def _send_email(message: str, env: dict[str, str], subject: str | None = None) -> dict[str, str]:
     msg = EmailMessage()
-    msg["Subject"] = env.get("ALERT_EMAIL_SUBJECT", "AI Bubble Monitor alert")
+    msg["Subject"] = subject or env.get("ALERT_EMAIL_SUBJECT", "美股警示")
     msg["From"] = env.get("ALERT_EMAIL_FROM", env.get("ALERT_EMAIL_USER", "ai-bubble-monitor@localhost"))
     msg["To"] = env["ALERT_EMAIL_TO"]
     msg.set_content(message)

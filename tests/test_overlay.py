@@ -44,6 +44,22 @@ class OverlayTests(unittest.TestCase):
         self.assertLessEqual(p.loc[first_out], 160.0 + 1e-9)  # 20% below the 200 peak
         self.assertEqual(exp.iloc[-1], 1.0)
 
+    def test_pct_trailing_reenters_on_new_50_day_high(self):
+        idx = pd.bdate_range("2020-01-01", periods=300)
+        p = pd.Series(np.r_[np.linspace(100, 200, 100), np.linspace(200, 120, 60), np.linspace(120, 260, 140)], index=idx)
+        exp = ov.pct_trailing_exposure(p, 0.20, 50)
+        out_day = exp[exp == 0].index[0]
+        self.assertLessEqual(p.loc[out_day], 160.0 + 1e-9)
+        back_in = exp.loc[out_day:][exp.loc[out_day:] == 1].index[0]
+        self.assertGreaterEqual(p.loc[back_in], p.shift(1).rolling(50).max().loc[back_in])
+
+    def test_chandelier_exits_on_range_multiple(self):
+        idx = pd.bdate_range("2020-01-01", periods=120)
+        p = pd.Series(np.r_[np.linspace(100, 150, 80), np.full(10, 150.0), np.linspace(150, 100, 30)], index=idx)
+        exp = ov.chandelier_exposure(p, 3.0, 22, 50)
+        self.assertEqual(exp.iloc[85], 1.0)
+        self.assertEqual(exp.iloc[-1], 0.0)
+
     def test_vol_target_scales_down_in_turbulence(self):
         rng = np.random.default_rng(1)
         calm = rng.normal(0, 0.005, 100)

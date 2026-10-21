@@ -116,6 +116,39 @@ def trailing_stop_exposure(price: pd.Series, stop: float = 0.20, reentry_sma: in
     return pd.Series(out, index=p.index)
 
 
+def _trailing_exit(price: pd.Series, stop_level, reentry_days: int = 50) -> pd.Series:
+    """Generic trailing exit: out when the close falls below ``stop_level(i, peak)``; back in on a
+    close at a new ``reentry_days``-day high (breakout re-entry, usable on short histories)."""
+    p = price.dropna()
+    v = p.values
+    prior_high = p.shift(1).rolling(reentry_days, min_periods=reentry_days).max().values
+    out = np.ones(len(p))
+    inside, peak = True, v[0]
+    for i in range(len(p)):
+        if inside:
+            peak = max(peak, v[i])
+            level = stop_level(i, peak)
+            if not np.isnan(level) and v[i] < level:
+                inside = False
+        elif not np.isnan(prior_high[i]) and v[i] >= prior_high[i]:
+            inside, peak = True, v[i]
+        out[i] = 1.0 if inside else 0.0
+    return pd.Series(out, index=p.index)
+
+
+def chandelier_exposure(price: pd.Series, mult: float = 3.0, n: int = 22, reentry_days: int = 50) -> pd.Series:
+    """LeBeau chandelier exit: highest close since entry minus ``mult`` x average daily range.
+    The range is the n-day mean absolute close-to-close change (close-only ATR)."""
+    p = price.dropna()
+    atr = p.diff().abs().rolling(n, min_periods=n).mean().values
+    return _trailing_exit(p, lambda i, peak: peak - mult * atr[i], reentry_days)
+
+
+def pct_trailing_exposure(price: pd.Series, stop: float = 0.20, reentry_days: int = 50) -> pd.Series:
+    """Out after a ``stop`` fall from the high since entry; back in on a new ``reentry_days``-day high."""
+    return _trailing_exit(price, lambda i, peak: peak * (1 - stop), reentry_days)
+
+
 def abs_momentum_exposure(price: pd.Series, cash_rate: pd.Series | None = None, months: int = 12) -> pd.Series:
     """Antonacci absolute momentum: in when the trailing 12-month return beats T-bills (month-end)."""
     p = price.dropna()

@@ -33,7 +33,8 @@ LOG_PATH = ROOT / "data" / "signal_log.csv"
 FRED_IDS = {"hy": "BAMLH0A0HYM2", "baa10y": "BAA10Y", "t10y2y": "T10Y2Y"}
 YAHOO_IDS = {"spx": "^GSPC", "ndx": "^NDX", "sox": "^SOX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"}
 ESSENTIAL = ("spx", "baa10y")  # without these no signal can be computed
-SEVERITY = {"warning_up": "warning", "warning_clear": "info", "entry": "info", "trend": "warning",
+SEVERITY = {"warning_up": "warning", "warning_clear": "info", "entry": "info", "trend": "info",
+            "exit": "critical", "exit_watch": "warning",
             "position": "warning", "data": "warning"}
 
 # Backtest evidence quoted in position-change alerts (scripts/run_index_study.py, price index, 1990-2026).
@@ -69,8 +70,13 @@ def status_text(name: str, sig, pos, others: list[tuple[str, object]] = ()) -> s
         lines.append("已進入修正區（跌幅 >10%），改看進場訊號：")
         lines += [f"  {'●' if today[f'e_{k}'] else '○'} {label}" for k, label in ds.ENTRY_SIGNALS.items()]
     ma10, price = pos.attrs["ma10_provisional"], pos.attrs["price"]
-    lines.append(f"10 個月均線：上月底判定{'在上方' if pos['trend'].iloc[-1] >= 1 else '在下方'}；"
-                 f"目前價格距均線 {price / ma10 - 1:+.1%}（月底收盤才確定）")
+    gap = price / ma10 - 1
+    if pos["trend"].iloc[-1] >= 1:
+        lines.append(f"出場訊號（10 個月均線）：未觸發；目前價格距均線 {gap:+.1%}，"
+                     "月底收盤跌破均線才會出場")
+    else:
+        lines.append(f"出場訊號（10 個月均線）：已觸發，空手中；目前價格距均線 {gap:+.1%}，"
+                     "月底收盤站回均線才會重新進場")
     lines.append(f"規則部位（均線 × 警示 + 恐慌進場）：{pos['target'].iloc[-1]:.0%}")
     for other_name, other_sig in others:
         o = other_sig.iloc[-1]

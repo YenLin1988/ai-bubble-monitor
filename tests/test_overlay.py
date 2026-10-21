@@ -36,6 +36,30 @@ class OverlayTests(unittest.TestCase):
         # entry while the trend is out lifts exposure to 50% until the trend turns back in
         self.assertEqual(ov.combined_exposure(trend, warn, entry).tolist(), [1, 0.5, 0, 0.5, 0.5, 1])
 
+    def test_trailing_stop_exits_and_reenters_above_average(self):
+        idx = pd.bdate_range("2020-01-01", periods=400)
+        p = pd.Series(np.r_[np.linspace(100, 200, 250), np.linspace(200, 150, 50), np.linspace(150, 260, 100)], index=idx)
+        exp = ov.trailing_stop_exposure(p, 0.20, 200)
+        first_out = exp[exp == 0].index[0]
+        self.assertLessEqual(p.loc[first_out], 160.0 + 1e-9)  # 20% below the 200 peak
+        self.assertEqual(exp.iloc[-1], 1.0)
+
+    def test_vol_target_scales_down_in_turbulence(self):
+        rng = np.random.default_rng(1)
+        calm = rng.normal(0, 0.005, 100)
+        wild = rng.normal(0, 0.04, 40)
+        p = pd.Series(100 * np.exp(np.cumsum(np.r_[calm, wild])), index=pd.bdate_range("2020-01-01", periods=140))
+        exp = ov.vol_target_exposure(p, 0.25, 20)
+        self.assertEqual(exp.iloc[90], 1.0)
+        self.assertLess(exp.iloc[-1], 0.5)
+
+    def test_abs_momentum_out_after_negative_year(self):
+        idx = pd.bdate_range("2018-01-01", "2020-12-31")
+        p = pd.Series(np.r_[np.linspace(100, 150, 500), np.linspace(150, 90, len(idx) - 500)], index=idx)
+        exp = ov.abs_momentum_exposure(p)
+        self.assertEqual(exp.loc["2019-06-03"], 1.0)
+        self.assertEqual(exp.iloc[-1], 0.0)
+
     def test_simulate_trades_one_day_after_signal(self):
         idx = pd.bdate_range("2020-01-01", periods=5)
         price = pd.Series([100, 100, 100, 110, 121], index=idx, dtype=float)

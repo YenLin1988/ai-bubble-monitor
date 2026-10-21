@@ -346,30 +346,75 @@ def todays_events(sig: pd.DataFrame, fwd: pd.DataFrame, hold_days: int = HOLD_DA
 def position_frame(spx: pd.Series, sig: pd.DataFrame, warning_level: int = 4) -> pd.DataFrame:
     """Rule exposure of the backtested "combo B" strategy (scripts/run_overlay_study.py).
 
-    trend      Faber 10-month average rule (1 = above, 0 = below), from completed months only:
-               the month in progress keeps last month-end's decision, so a flip appears on the
-               first trading day of the new month, the same day the backtest trades it.
+    trend      Faber 10-month average rule (1 = above, 0 = below), decided at the close of a month's
+               last trading day; mid-month days keep the previous decision. Every decision is traded
+               at the next close, as in the backtest.
     warning    0.5 while the early warning (>= ``warning_level``) is active, else 1.
     target     trend x warning, but at least 0.5 after an entry signal while the trend is out.
+    ma10_gap   price versus the provisional 10-month average (9 previous month-ends + today).
+    attrs["exit_stats"]  what happened after past exits on this index (see ``exit_stats``).
     """
     from .overlay import combined_exposure, faber_exposure, warning_overlay
 
     p = spx.dropna()
     trend = faber_exposure(p)
-    current = p.index[-1].to_period("M")
-    in_current = p.index.to_period("M") == current
-    if in_current.any() and (~in_current).any():
-        trend[in_current] = trend[~in_current].iloc[-1]
+    # faber_exposure treats the last row as a month-end decision. That is only final if today is the
+    # month's last trading day; otherwise today keeps the previous decision (no mid-month flips).
+    if len(trend) > 1 and not is_last_trading_day_of_month(p.index[-1]):
+        trend.iloc[-1] = trend.iloc[-2]
     warn = warning_overlay(sig, warning_level)
     entry = sig[[f"e_{k}" for k in ENTRY_SIGNALS]].fillna(False).astype(bool).any(axis=1)
     target = combined_exposure(trend, warn, entry)
 
     monthly = p.resample("ME").last()
     ma10 = monthly.rolling(10, min_periods=10).mean()
-    out = pd.DataFrame({"trend": trend, "warning": warn, "target": target}, index=p.index)
+    # Provisional 10-month average on each day: the 9 previous month-end closes plus today's close.
+    prev9_sum = monthly.rolling(9, min_periods=9).sum().shift(1)
+    month_of_day = p.index.to_period("M")
+    prev9 = pd.Series(prev9_sum.values, index=prev9_sum.index.to_period("M")).reindex(month_of_day).values
+    gap = p / ((prev9 + p.values) / 10) - 1
+    out = pd.DataFrame({"trend": trend, "warning": warn, "target": target, "ma10_gap": gap}, index=p.index)
     out.attrs["ma10_provisional"] = float(ma10.iloc[-1])
     out.attrs["price"] = float(p.iloc[-1])
+    out.attrs["exit_stats"] = exit_stats(p)
     return out
+
+
+def is_last_trading_day_of_month(day: pd.Timestamp) -> bool:
+    """True when the next weekday falls in a new month. Exchange holidays on the month's last
+    weekday (rare) make this miss by one day; the flip then shows on the first day of the new month."""
+    return (day + pd.offsets.BDay(1)).month != day.month
+
+
+def exit_stats(price: pd.Series) -> dict:
+    """History of the 10-month-average exit on this index: what happened after each exit.
+
+    saved: the rule bought back cheaper than it sold (the exit avoided a decline).
+    further_drop: lowest close within a year after the exit, versus the exit price.
+    """
+    from .overlay import faber_exposure
+
+    p = price.dropna()
+    trend = faber_exposure(p)
+    change = trend.diff().fillna(0)
+    exits, entries = change.index[change < 0], change.index[change > 0]
+    rows = []
+    for d in exits:
+        later = entries[entries > d]
+        p0 = p.loc[d]
+        back = p.loc[later[0]] / p0 - 1 if len(later) else np.nan
+        rows.append({"date": d, "reentry_vs_exit": back,
+                     "further_drop": p.loc[d:].iloc[:253].min() / p0 - 1})
+    df = pd.DataFrame(rows)
+    done = df.dropna(subset=["reentry_vs_exit"]) if len(df) else df
+    return {
+        "exits": len(df), "since": p.index[0].year,
+        "saved": int((done["reentry_vs_exit"] < 0).sum()) if len(done) else 0, "closed": len(done),
+        "median_reentry_vs_exit": float(done["reentry_vs_exit"].median()) if len(done) else np.nan,
+        "worst_whipsaw": float(done["reentry_vs_exit"].max()) if len(done) else np.nan,
+        "median_further_drop": float(df["further_drop"].median()) if len(df) else np.nan,
+        "big_drops_avoided": int((df["further_drop"] <= -0.20).sum()) if len(df) else 0,
+    }
 
 
 def position_events(pos: pd.DataFrame, date_label: str,
@@ -378,19 +423,36 @@ def position_events(pos: pd.DataFrame, date_label: str,
         return []
     today, prev = pos.iloc[-1], pos.iloc[-2]
     events = []
-    if today["trend"] != prev["trend"]:
-        up = today["trend"] >= 1
+    st = pos.attrs.get("exit_stats") or {}
+    if today["trend"] < prev["trend"]:
+        history = ""
+        if st.get("exits"):
+            history = (f"{st['since']} 年以來這個指數出現過 {st['exits']} 次出場訊號：之後一年內跌幅中位數 "
+                       f"{st['median_further_drop']:+.1%}，其中 {st['big_drops_avoided']} 次之後又跌超過 20%；"
+                       f"已重新進場的 {st['closed']} 次中，{st['saved']} 次買回價比賣出價低（真的避開下跌），"
+                       f"最差一次買回價比賣出價高 {st['worst_whipsaw']:+.1%}（被洗出場）。\n")
         events.append(SignalEvent(
-            f"trend-{date_label}", "trend",
-            "10 個月均線：月底收盤" + ("站回均線上方" if up else "跌破均線"),
-            ("上月收盤回到 10 個月均線之上。" if up else "上月收盤跌破 10 個月均線。")
-            + "歷史上這條規則在 8 個海外市場 48 次空頭中有 45 次少虧，代價是反彈時常較晚買回。",
+            f"exit-{date_label}", "exit", "出場訊號：月底收盤跌破 10 個月均線",
+            "本月最後一個交易日收盤跌破 10 個月均線，照規則在下一個交易日收盤減碼。\n" + history
+            + "出場訊號一定晚於最高點：觸發時指數通常已從高點跌了一段（SOX 歷史上是 13–39%）。它的目的是避開之後更大的跌幅，"
+            "不是賣在最高點。這是規則的機械輸出，不是投資建議。",
+        ))
+    elif today["trend"] > prev["trend"]:
+        events.append(SignalEvent(
+            f"trend-{date_label}", "trend", "重新進場訊號：月底收盤站回 10 個月均線",
+            "本月最後一個交易日收盤回到 10 個月均線之上，照規則在下一個交易日收盤恢復持有。",
+        ))
+    elif today["trend"] >= 1 and today["ma10_gap"] < 0 and not (pos["ma10_gap"].iloc[-11:-1] < 0).any():
+        events.append(SignalEvent(
+            f"exit-watch-{date_label}", "exit_watch", "出場預警：價格跌到 10 個月均線之下",
+            f"目前價格比 10 個月均線低 {abs(today['ma10_gap']):.1%}。這還不是出場訊號："
+            "要等這個月最後一個交易日收盤仍在均線之下，當天收盤後才會正式發出出場訊號。",
         ))
     if today["target"] != prev["target"]:
         events.append(SignalEvent(
             f"position-{date_label}-{today['target']:.2f}", "position",
             f"規則部位調整：{prev['target']:.0%} → {today['target']:.0%}",
-            f"依回測過的「均線 × 警示 + 恐慌進場」規則（{evidence}）。照規則在今天收盤調整。"
+            f"依回測過的「均線 × 警示 + 恐慌進場」規則（{evidence}）。照規則在下一個交易日收盤調整。"
             "這是規則的機械輸出，不是投資建議。",
         ))
     return events

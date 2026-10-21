@@ -77,6 +77,65 @@ def faber_exposure(price: pd.Series) -> pd.Series:
     return decided.reindex(p.index).ffill().fillna(1.0)
 
 
+def _month_end_decisions(p: pd.Series, decide: pd.Series) -> pd.Series:
+    """Spread a month-end decision (indexed by month) over the following trading days."""
+    last_days = p.groupby(p.index.to_period("M")).apply(lambda s: s.index[-1])
+    decided = pd.Series(decide.values, index=pd.DatetimeIndex(last_days.values[:len(decide)]))
+    return decided.reindex(p.index).ffill().fillna(1.0)
+
+
+def sma_exposure(price: pd.Series, n: int = 200) -> pd.Series:
+    """In while the daily close is above its ``n``-day average."""
+    p = price.dropna()
+    sma = p.rolling(n, min_periods=n).mean()
+    return (p > sma).astype(float).where(sma.notna(), 1.0)
+
+
+def cross_exposure(price: pd.Series, fast: int = 50, slow: int = 200) -> pd.Series:
+    """Golden/death cross: in while the fast average is above the slow one."""
+    p = price.dropna()
+    f, s = p.rolling(fast, min_periods=fast).mean(), p.rolling(slow, min_periods=slow).mean()
+    return (f > s).astype(float).where(s.notna(), 1.0)
+
+
+def trailing_stop_exposure(price: pd.Series, stop: float = 0.20, reentry_sma: int = 200) -> pd.Series:
+    """Exit after a ``stop`` fall from the high since entry; re-enter on a close above the ``reentry_sma`` average."""
+    p = price.dropna()
+    sma = p.rolling(reentry_sma, min_periods=reentry_sma).mean().values
+    v = p.values
+    out = np.ones(len(p))
+    inside, peak = True, v[0]
+    for i in range(len(p)):
+        if inside:
+            peak = max(peak, v[i])
+            if v[i] <= peak * (1 - stop):
+                inside = False
+        elif not np.isnan(sma[i]) and v[i] > sma[i]:
+            inside, peak = True, v[i]
+        out[i] = 1.0 if inside else 0.0
+    return pd.Series(out, index=p.index)
+
+
+def abs_momentum_exposure(price: pd.Series, cash_rate: pd.Series | None = None, months: int = 12) -> pd.Series:
+    """Antonacci absolute momentum: in when the trailing 12-month return beats T-bills (month-end)."""
+    p = price.dropna()
+    m = p.resample("ME").last()
+    ret = m / m.shift(months) - 1
+    hurdle = 0.0
+    if cash_rate is not None:
+        cr = cash_rate.reindex(cash_rate.index.union(m.index)).ffill().reindex(m.index) / 100
+        hurdle = (1 + cr / 12).rolling(months, min_periods=months).apply(np.prod, raw=True) - 1
+    decide = (ret > hurdle).astype(float).where(ret.notna(), 1.0)
+    return _month_end_decisions(p, decide)
+
+
+def vol_target_exposure(price: pd.Series, target: float = 0.25, window: int = 20) -> pd.Series:
+    """Moreira & Muir volatility targeting: exposure = target / realised vol, capped at 100%."""
+    p = price.dropna()
+    rv = np.log(p).diff().rolling(window, min_periods=window).std() * np.sqrt(TRADING_DAYS)
+    return (target / rv).clip(upper=1.0).fillna(1.0)
+
+
 def combined_exposure(trend: pd.Series, warning: pd.Series, entry: pd.Series | None = None,
                       entry_floor: float = 0.5) -> pd.Series:
     """Trend exposure (0/1) times warning exposure (0.5/1).

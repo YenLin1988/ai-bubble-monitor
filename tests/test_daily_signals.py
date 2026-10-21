@@ -86,6 +86,48 @@ class PositionTests(unittest.TestCase):
         self.assertLess(pos.attrs["price"] / pos.attrs["ma10_provisional"], 1)  # but the preview shows it below
 
 
+class ExitSignalTests(unittest.TestCase):
+    def _crash_into(self, end):
+        idx = pd.bdate_range("2019-01-01", end)
+        spx = pd.Series(np.linspace(100, 150, len(idx)), index=idx)
+        spx.loc[pd.Timestamp(end).replace(day=1):] = 60.0
+        sig = ds.compute_signals(_frame(spx.values))
+        sig.index = idx
+        return spx, sig
+
+    def test_last_trading_day_detection(self):
+        self.assertTrue(ds.is_last_trading_day_of_month(pd.Timestamp("2026-10-30")))   # Friday
+        self.assertFalse(ds.is_last_trading_day_of_month(pd.Timestamp("2026-10-29")))
+        self.assertTrue(ds.is_last_trading_day_of_month(pd.Timestamp("2026-02-27")))   # Fri, 28th is Sat
+
+    def test_exit_fires_on_month_end_close_only(self):
+        spx, sig = self._crash_into("2020-03-31")
+        pos = ds.position_frame(spx, sig)
+        self.assertEqual(pos["trend"].iloc[-1], 0.0)
+        kinds = [e.kind for e in ds.position_events(pos, "2020-03-31")]
+        self.assertIn("exit", kinds)
+        mid = ds.position_frame(spx.loc[:"2020-03-20"], sig.loc[:"2020-03-20"])
+        self.assertEqual(mid["trend"].iloc[-1], 1.0)
+        self.assertNotIn("exit", [e.kind for e in ds.position_events(mid, "2020-03-20")])
+
+    def test_exit_watch_when_price_dips_below_average_mid_month(self):
+        spx, sig = self._crash_into("2020-03-31")
+        first_dip = ds.position_frame(spx.loc[:"2020-03-02"], sig.loc[:"2020-03-02"])
+        self.assertLess(first_dip["ma10_gap"].iloc[-1], 0)
+        self.assertEqual([e.kind for e in ds.position_events(first_dip, "2020-03-02")], ["exit_watch"])
+
+    def test_exit_stats_counts_saved_and_whipsaws(self):
+        idx = pd.bdate_range("2015-01-01", "2020-12-31")
+        p = pd.Series(100.0, index=idx)
+        p.loc["2015-01-01":"2016-12-31"] = np.linspace(100, 200, len(p.loc["2015-01-01":"2016-12-31"]))
+        p.loc["2017-01-01":"2018-06-30"] = np.linspace(200, 80, len(p.loc["2017-01-01":"2018-06-30"]))
+        p.loc["2018-07-01":] = np.linspace(80, 220, len(p.loc["2018-07-01":]))
+        st = ds.exit_stats(p)
+        self.assertGreaterEqual(st["exits"], 1)
+        self.assertEqual(st["saved"], st["closed"])  # bought back lower after the crash
+        self.assertGreaterEqual(st["big_drops_avoided"], 1)
+
+
 class EventTests(unittest.TestCase):
     def _sig(self, levels):
         idx = pd.bdate_range("2020-01-01", periods=len(levels))

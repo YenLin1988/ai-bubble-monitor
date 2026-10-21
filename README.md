@@ -126,7 +126,7 @@ External dispatch is disabled by default. Copy `.env.example`, set the channel c
 
 ## Daily Early Warning & Entry Signals
 
-`scripts/daily_alert.py` checks the S&P 500 once per trading day (GitHub Actions: `daily_signals.yml`, 22:00 UTC Mon–Fri) and pushes to Email / Discord / webhook when a signal changes.
+`scripts/daily_alert.py` checks the index set by `ALERT_INDEX` (default `sox`, the Philadelphia Semiconductor index; also `ndx` or `spx`; the others appear as reference lines) once per trading day (GitHub Actions: `daily_signals.yml`, 22:00 UTC Mon–Fri) and pushes to Email / Discord / webhook when a signal changes.
 
 **Early warning** (market within 10% of its 1-year high) — count of 5 conditions: HY spread +0.40pp in 20 days, small caps lagging 5%+ over 60 days, VIX/VIX3M ≥ 0.95, S&P 500 below its 50-day average, yield curve re-steepened after an inversion. Pushes at ≥ `ALERT_MIN_WARNING_LEVEL` (default 3), held for 5 trading days to avoid flip-flopping.
 

@@ -26,8 +26,8 @@ from bubble_monitor.data_sources import load_many  # noqa: E402
 CACHE_DIR = ROOT / "data" / "backtest_cache"
 REPORT_DIR = ROOT / "reports"
 FRED_IDS = {"hy": "BAMLH0A0HYM2", "baa10y": "BAA10Y", "t10y2y": "T10Y2Y", "tbill": "DTB3"}
-YAHOO_IDS = {"spx": "^GSPC", "ndx": "^NDX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"}
-INDEXES = {"spx": "S&P 500", "ndx": "那斯達克 100"}
+YAHOO_IDS = {"spx": "^GSPC", "ndx": "^NDX", "sox": "^SOX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"}
+INDEXES = {"spx": "S&P 500", "ndx": "那斯達克 100", "sox": "費城半導體 SOX"}
 START = "1990-01-01"
 PERIODS = {"全期": ("1990-01-01", "2026-12-31"), "1990–2007": ("1990-01-01", "2007-12-31"),
            "2008–2026": ("2008-01-01", "2026-12-31")}
@@ -126,7 +126,7 @@ def main() -> None:
             "報酬 ÷ 最大回撤": p["calmar"].map(lambda x: f"{x:.2f}"), "減碼時間": p["time_defensive"].map(lambda x: _pct(x, 0)),
         }))
 
-    fig = make_subplots(rows=1, cols=2, subplot_titles=list(INDEXES.values()))
+    fig = make_subplots(rows=1, cols=len(INDEXES), subplot_titles=list(INDEXES.values()))
     colors = {"buy_hold": "#8B949E", "warn4": "#F0883E", "faber": "#58A6FF", "combo_a": "#BC8CFF", "combo_b": "#2EA043"}
     for col, key in enumerate(INDEXES, start=1):
         for k, sim in sims_all[key].items():
@@ -146,7 +146,7 @@ h1{{font-size:24px}} h2{{font-size:19px;margin-top:36px;border-bottom:1px solid 
 .tbl th:first-child,.tbl td:first-child,.tbl td:nth-child(2){{text-align:left}} .tbl th{{color:#8B949E;font-weight:600}}
 .note{{color:#8B949E;font-size:13px}}
 </style></head><body>
-<h1>同一套規則：S&amp;P 500 vs 那斯達克 100（1990–2026）</h1>
+<h1>同一套規則：S&amp;P 500、那斯達克 100、費城半導體（1990–2026）</h1>
 <p class="note">規則完全不變，只把「距高點、50 日均線、跌幅門檻、10 個月均線」換成目標指數；信用利差、VIX、小型股廣度、殖利率曲線是全市場指標，兩邊共用。
 兩個指數都用價格指數（不含股息）、現金賺國庫券利率，方便直接比較。</p>
 <h2>資金曲線</h2>{fig.to_html(full_html=False, include_plotlyjs="cdn")}

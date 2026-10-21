@@ -7,7 +7,7 @@ Usage:
     python scripts/daily_alert.py --dry-run  # print what would be sent, send nothing, do not log
 
 Channels come from environment variables (or a local .env file); see .env.example.
-Sending requires ALERTS_ENABLED=1. ALERT_INDEX picks the tracked index: ndx (default) or spx.
+Sending requires ALERTS_ENABLED=1. ALERT_INDEX picks the tracked index: sox (default), ndx or spx.
 Every non-dry run appends today's signals to data/signal_log.csv (the forward-test record).
 """
 
@@ -31,14 +31,17 @@ from bubble_monitor.notifications import dispatch_alerts, enabled_channels  # no
 CACHE_DIR = ROOT / "data" / "backtest_cache"
 LOG_PATH = ROOT / "data" / "signal_log.csv"
 FRED_IDS = {"hy": "BAMLH0A0HYM2", "baa10y": "BAA10Y", "t10y2y": "T10Y2Y"}
-YAHOO_IDS = {"spx": "^GSPC", "ndx": "^NDX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"}
+YAHOO_IDS = {"spx": "^GSPC", "ndx": "^NDX", "sox": "^SOX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"}
 ESSENTIAL = ("spx", "baa10y")  # without these no signal can be computed
 SEVERITY = {"warning_up": "warning", "warning_clear": "info", "entry": "info", "trend": "warning",
             "position": "warning", "data": "warning"}
 
 # Backtest evidence quoted in position-change alerts (scripts/run_index_study.py, price index, 1990-2026).
 INDEXES = {
-    "ndx": ("那斯達克 100", "那斯達克 100 1990–2026：年化報酬與一直持有相同（14.1%），最大回撤 -39% 對 -83%；"
+    "sox": ("費城半導體 SOX", "費城半導體 1994–2026：年化 19.5% 對一直持有 15.1%，最大回撤 -51% 對 -87%；"
+                           "2008 年後報酬相近（19.6% 對 19.3%）、最大回撤 -33% 對 -59%。"
+                           "保護主要來自 10 個月均線，早期警示對 SOX 幾乎沒有鑑別力"),
+    "ndx": ("那斯達克 100","那斯達克 100 1990–2026：年化報酬與一直持有相同（14.1%），最大回撤 -39% 對 -83%；"
                          "但 2008 年後每年約少賺 2 個百分點"),
     "spx": ("S&P 500", "S&P 500 1990–2026：年化報酬與一直持有相近，最大回撤 -21% 對 -55%；8 個海外市場夏普值全部變好"),
 }
@@ -54,7 +57,7 @@ def load_dotenv(path: Path) -> None:
             os.environ.setdefault(key.strip(), value.strip())
 
 
-def status_text(name: str, sig, pos, other: tuple[str, object] | None = None) -> str:
+def status_text(name: str, sig, pos, others: list[tuple[str, object]] = ()) -> str:
     today = sig.iloc[-1]
     lvl = int(today["warning_level"])
     lines = [f"{sig.index[-1]:%Y-%m-%d} {name} 狀態",
@@ -69,8 +72,7 @@ def status_text(name: str, sig, pos, other: tuple[str, object] | None = None) ->
     lines.append(f"10 個月均線：上月底判定{'在上方' if pos['trend'].iloc[-1] >= 1 else '在下方'}；"
                  f"目前價格距均線 {price / ma10 - 1:+.1%}（月底收盤才確定）")
     lines.append(f"規則部位（均線 × 警示 + 恐慌進場）：{pos['target'].iloc[-1]:.0%}")
-    if other is not None:
-        other_name, other_sig = other
+    for other_name, other_sig in others:
         o = other_sig.iloc[-1]
         lines.append(f"參考 {other_name}：距一年高點 {o['dd_1y']:+.1%}，早期警示 {int(o['warning_level'])}/5")
     return "\n".join(lines)
@@ -108,7 +110,7 @@ def main() -> None:
     load_dotenv(ROOT / ".env")
 
     # GitHub Actions passes unset variables as empty strings, so fall back on "" too.
-    index_key = (os.environ.get("ALERT_INDEX") or "ndx").lower().lstrip("^")
+    index_key = (os.environ.get("ALERT_INDEX") or "sox").lower().lstrip("^")
     if index_key not in INDEXES:
         sys.exit(f"ALERT_INDEX must be one of {list(INDEXES)}, got {index_key!r}")
     name, evidence = INDEXES[index_key]
@@ -134,9 +136,9 @@ def main() -> None:
     fwd = ds.forward_outcomes(target.ffill())
     events, pos = events_for(sig, fwd, target, evidence, min_level)
 
-    other_key = "spx" if index_key != "spx" else "ndx"
-    other_sig = ds.compute_signals(d, None if other_key == "spx" else raw.get(other_key)) if other_key in raw else None
-    status = status_text(name, sig, pos, (INDEXES[other_key][0], other_sig) if other_sig is not None else None)
+    others = [(INDEXES[k][0], ds.compute_signals(d, None if k == "spx" else raw[k]))
+              for k in INDEXES if k != index_key and k in raw]
+    status = status_text(name, sig, pos, others)
     print(status, "\n")
 
     if not args.dry_run:

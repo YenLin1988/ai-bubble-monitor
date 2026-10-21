@@ -889,6 +889,9 @@ st.markdown("<p style='color:#8B949E; font-size:0.8rem; margin-top:-10px;'>與�
             "回測與前向測試細節見 reports/ 與 data/signal_log.csv</p>", unsafe_allow_html=True)
 
 
+SIGNAL_INDEX_NAMES = {"sox": "費城半導體 SOX", "ndx": "那斯達克 100", "spx": "S&P 500"}
+
+
 @st.cache_data(ttl=3600)
 def load_daily_signals(index_key):
     from pathlib import Path
@@ -898,7 +901,7 @@ def load_daily_signals(index_key):
 
     raw, problems = load_with_health(
         {"hy": "BAMLH0A0HYM2", "baa10y": "BAA10Y", "t10y2y": "T10Y2Y"},
-        {"spx": "^GSPC", "ndx": "^NDX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"},
+        {"spx": "^GSPC", "ndx": "^NDX", "sox": "^SOX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"},
         None, 0)
     if any(k not in raw for k in ("spx", "baa10y", index_key)):
         return None, problems
@@ -910,7 +913,7 @@ def load_daily_signals(index_key):
     log_path = Path(__file__).resolve().parent / "data" / "signal_log.csv"
     card = signal_log.scorecard_text(
         signal_log.scorecard(signal_log.read_log(log_path), index_key, target),
-        "那斯達克 100" if index_key == "ndx" else "S&P 500")
+        SIGNAL_INDEX_NAMES[index_key])
     return {
         "sig": sig.iloc[-520:], "price": target.iloc[-520:], "target": pos["target"].iloc[-520:],
         "trend": float(pos["trend"].iloc[-1]), "ma10_gap": pos.attrs["price"] / pos.attrs["ma10_provisional"] - 1,
@@ -919,8 +922,7 @@ def load_daily_signals(index_key):
     }, problems
 
 
-sig_index = st.radio("指數", ["ndx", "spx"], horizontal=True,
-                     format_func=lambda k: "那斯達克 100" if k == "ndx" else "S&P 500")
+sig_index = st.radio("指數", list(SIGNAL_INDEX_NAMES), horizontal=True, format_func=SIGNAL_INDEX_NAMES.get)
 daily, daily_problems = load_daily_signals(sig_index)
 for problem in daily_problems:
     st.warning(f"資料問題：{problem}")

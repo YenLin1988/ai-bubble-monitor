@@ -79,6 +79,24 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(int(sig["warning_inputs"].iloc[-1]), 2)  # only vol and trend are known
 
 
+class RetryMarkerTests(unittest.TestCase):
+    def test_marker_keeps_first_failure_time_and_clears(self):
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        import daily_alert as da
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(da, "PENDING_PATH", Path(tmp) / "p.json"):
+            self.assertIsNone(da.read_pending())
+            da.write_pending(dt.datetime(2026, 10, 22, 1, 0, tzinfo=dt.timezone.utc), ["FRED down"])
+            da.write_pending(dt.datetime(2026, 10, 22, 3, 30, tzinfo=dt.timezone.utc), ["FRED still down"])
+            marker = da.read_pending()
+            self.assertEqual(marker["since"], "2026-10-22 01:00 UTC")  # first failure, not the latest retry
+            self.assertEqual(marker["problems"], ["FRED still down"])
+            da.clear_pending()
+            self.assertIsNone(da.read_pending())
+            da.clear_pending()  # clearing twice is fine
+
+
 class SignalLogTests(unittest.TestCase):
     def _sig(self, levels, dd=-0.02, entry=None):
         idx = pd.bdate_range("2026-01-01", periods=len(levels))

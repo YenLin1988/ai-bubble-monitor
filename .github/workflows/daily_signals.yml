@@ -4,6 +4,9 @@ on:
   schedule:
     # 22:00 UTC Mon-Fri = after the US close (17:00/18:00 New York). The Friday run also sends the weekly summary.
     - cron: '0 22 * * 1-5'
+    # Every 2 hours: only does work while data/pending_retry.json exists (a run had to use old data because a
+    # provider was down). Once the data is back it sends one corrected report and clears the marker.
+    - cron: '30 */2 * * *'
   workflow_dispatch:
     inputs:
       status:
@@ -15,7 +18,7 @@ on:
         type: boolean
         default: false
 
-# Needed to commit the forward-test log (data/signal_log.csv) back to the repository.
+# Needed to commit the forward-test log and the retry marker back to the repository.
 permissions:
   contents: write
 
@@ -23,21 +26,37 @@ concurrency:
   group: daily-signals
   cancel-in-progress: false
 
+env:
+  RETRY_RUN: ${{ github.event.schedule == '30 */2 * * *' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # Retry runs stop here unless a previous run left a retry marker.
+      - name: Anything to retry?
+        id: gate
+        run: |
+          if [ "$RETRY_RUN" = "true" ] && [ ! -f data/pending_retry.json ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "No pending retry."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
         with:
           python-version: '3.12'
 
       - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
         run: pip install -r requirements.txt
 
       # Last successful downloads, used only as a fallback when a provider is down (e.g. FRED maintenance).
       - name: Restore last good data
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: data/backtest_cache
@@ -46,11 +65,13 @@ jobs:
 
       # Restored files look brand new; age them so every run still tries a fresh download first.
       - name: Mark restored data as old
+        if: steps.gate.outputs.run == 'true'
         run: |
           mkdir -p data/backtest_cache
           find data/backtest_cache -type f -exec touch -d '2 days ago' {} +
 
       - name: Run daily signal check
+        if: steps.gate.outputs.run == 'true'
         env:
           ALERTS_ENABLED: ${{ secrets.ALERTS_ENABLED }}
           ALERT_MIN_WARNING_LEVEL: ${{ vars.ALERT_MIN_WARNING_LEVEL }}
@@ -65,16 +86,19 @@ jobs:
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
         run: >-
           python scripts/daily_alert.py
+          ${{ env.RETRY_RUN == 'true' && '--retry' || '' }}
           ${{ inputs.status && '--status' || '' }}
           ${{ inputs.weekly && '--weekly' || '' }}
 
-      - name: Save forward-test log
+      # Runs even when the check failed, so a retry marker written before a failure is still saved.
+      - name: Save forward-test log and retry marker
+        if: always() && steps.gate.outputs.run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/signal_log.csv
+          git add -A data/
           if git diff --cached --quiet; then
-            echo "Log unchanged"
+            echo "Nothing to save"
           else
             git commit -m "Log daily signals $(date -u +%Y-%m-%d)"
             git pull --rebase

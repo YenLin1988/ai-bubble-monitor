@@ -5,6 +5,7 @@ Usage:
     python scripts/daily_alert.py --status   # also send today's status even if nothing changed
     python scripts/daily_alert.py --weekly   # also send the weekly summary (automatic on scheduled Friday runs)
     python scripts/daily_alert.py --dry-run  # print what would be sent, send nothing, do not log
+    python scripts/daily_alert.py --retry    # after a data outage: re-check and send the corrected report once fixed
 
 Channels come from environment variables (or a local .env file); see .env.example.
 Sending requires ALERTS_ENABLED=1. ALERT_INDEX picks the tracked index: sox (default), ndx or spx.
@@ -14,6 +15,7 @@ Every non-dry run appends today's signals to data/signal_log.csv (the forward-te
 from __future__ import annotations
 
 import argparse
+import json
 import datetime as dt
 import os
 import sys
@@ -30,6 +32,7 @@ from bubble_monitor.notifications import dispatch_alerts, enabled_channels  # no
 
 CACHE_DIR = ROOT / "data" / "backtest_cache"
 LOG_PATH = ROOT / "data" / "signal_log.csv"
+PENDING_PATH = ROOT / "data" / "pending_retry.json"  # retry marker, committed by the workflow
 FRED_IDS = {"hy": "BAMLH0A0HYM2", "baa10y": "BAA10Y", "t10y2y": "T10Y2Y"}
 YAHOO_IDS = {"spx": "^GSPC", "ndx": "^NDX", "sox": "^SOX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"}
 ESSENTIAL = ("spx",)  # plus the tracked index; FRED credit/curve data is optional (conditions read "unknown")
@@ -46,6 +49,25 @@ INDEXES = {
                          "但 2008 年後每年約少賺 2 個百分點"),
     "spx": ("S&P 500", "S&P 500 1990–2026：年化報酬與一直持有相近，最大回撤 -21% 對 -55%；8 個海外市場夏普值全部變好"),
 }
+
+
+def read_pending() -> dict | None:
+    """The retry marker: present while a run had to fall back to old data."""
+    try:
+        return json.loads(PENDING_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_pending(now: dt.datetime, problems: list[str]) -> None:
+    since = (read_pending() or {}).get("since") or now.strftime("%Y-%m-%d %H:%M UTC")
+    PENDING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PENDING_PATH.write_text(json.dumps({"since": since, "problems": problems}, ensure_ascii=False, indent=1),
+                            encoding="utf-8")
+
+
+def clear_pending() -> None:
+    PENDING_PATH.unlink(missing_ok=True)
 
 
 def load_dotenv(path: Path) -> None:
@@ -111,6 +133,8 @@ def main() -> None:
     ap.add_argument("--status", action="store_true", help="send today's status even without a new signal")
     ap.add_argument("--weekly", action="store_true", help="send the weekly summary")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--retry", action="store_true",
+                    help="only if an earlier run fell back to old data: re-check, and send an updated report once it is fixed")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     load_dotenv(ROOT / ".env")
@@ -122,17 +146,29 @@ def main() -> None:
     name, evidence = INDEXES[index_key]
     min_level = int(os.environ.get("ALERT_MIN_WARNING_LEVEL") or "3")
     now = dt.datetime.now(dt.timezone.utc)
-    weekly = args.weekly or (os.environ.get("GITHUB_EVENT_NAME") == "schedule" and now.weekday() == 4)
+    weekly = args.weekly or (not args.retry and os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+                             and now.weekday() == 4)
+
+    pending = read_pending()
+    if args.retry and pending is None:
+        print("沒有待補發的報告，結束。")
+        return
 
     raw, problems = load_with_health(FRED_IDS, YAHOO_IDS, CACHE_DIR, 6 * 3600, now.date())
     for p in problems:
         print("資料問題：", p)
+    failed = [p for p in problems if "下載失敗" in p]
     missing = [k for k in (*ESSENTIAL, index_key) if k not in raw]
+    if args.retry and (failed or missing):
+        print(f"資料仍未恢復（自 {pending['since']} 起），不寄信，稍後再試。")
+        return
     if missing:
         alert = Alert(f"data-fatal-{now:%Y-%m-%d}", "critical", "資料異常：今天無法計算訊號",
-                      "缺少必要資料：" + "、".join(missing) + "。\n" + "\n".join(problems))
+                      "缺少必要資料：" + "、".join(missing) + "。\n" + "\n".join(problems)
+                      + "\n\n系統會每 2 小時重試一次，資料恢復後自動寄出今天的報告。")
         print(f"[CRITICAL] {alert.title}\n{alert.message}")
         if not args.dry_run:
+            write_pending(now, problems)
             dispatch_alerts([alert])
         sys.exit(1)
 
@@ -154,10 +190,24 @@ def main() -> None:
         log = signal_log.read_log(LOG_PATH)
     card_text = signal_log.scorecard_text(signal_log.scorecard(log, index_key, target, min_level), name)
 
-    alerts = [Alert(f"{index_key}-{e.key}", SEVERITY[e.kind], f"[{name}] {e.title}", e.message) for e in events]
-    if problems:
+    if args.retry:
+        # Data is back: one combined, corrected report for today instead of re-sending each event.
+        body = [f"原本在 {pending['since']} 的檢查有資料下載失敗，現在已恢復，以下是用最新資料重新計算的結果。", "", status]
+        if events:
+            body += ["", "今天的訊號："] + [f"• {e.title}\n  {e.message}" for e in events]
+        alerts = [Alert(f"{index_key}-recovered-{now:%Y-%m-%d-%H}", "info", f"[{name}] 資料已恢復：更新後的今日報告",
+                        "\n".join(body))]
+    else:
+        alerts = [Alert(f"{index_key}-{e.key}", SEVERITY[e.kind], f"[{name}] {e.title}", e.message) for e in events]
+    if problems and not args.retry:
+        note = "\n\n系統會每 2 小時重試一次，資料恢復後自動寄出更新後的報告。" if failed else ""
         alerts.append(Alert(f"data-{now:%Y-%m-%d}", "warning", "資料異常（訊號仍照算，但可能不準）",
-                            "\n".join(problems)))
+                            "\n".join(problems) + note))
+    if not args.dry_run:
+        if failed:
+            write_pending(now, problems)
+        else:
+            clear_pending()
     if args.status:
         alerts.append(Alert(f"{index_key}-status-{sig.index[-1]:%Y-%m-%d}", "info", f"[{name}] 每日狀態", status))
     if weekly:

@@ -9,8 +9,22 @@ from typing import Callable, Mapping
 import pandas as pd
 
 
+class FredUnavailable(RuntimeError):
+    """FRED answered with a web page (e.g. its maintenance page) instead of CSV data."""
+
+
 def load_fred(series_id: str) -> pd.Series:
-    df = pd.read_csv(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}", na_values=".").dropna()
+    import io
+    import urllib.request
+
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = resp.read().decode("utf-8", "replace")
+    if body.lstrip()[:15].lower().startswith(("<!doctype", "<html")):
+        title = body.split("<title>", 1)[1].split("<", 1)[0].strip() if "<title>" in body else "unknown page"
+        raise FredUnavailable(f"FRED 回傳網頁而不是資料（{title}，可能是網站維護中）")
+    df = pd.read_csv(io.StringIO(body), na_values=".").dropna()
     return pd.Series(df.iloc[:, 1].astype(float).values, index=pd.to_datetime(df.iloc[:, 0]))
 
 

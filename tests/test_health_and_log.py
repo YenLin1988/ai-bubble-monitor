@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from bubble_monitor import daily_signals as ds
-from bubble_monitor import health, signal_log
+from bubble_monitor import data_sources, health, signal_log
 
 
 def _series(end: str, n: int = 30) -> pd.Series:
@@ -32,6 +32,51 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(len(problems), 2)
         self.assertTrue(any("^BAD" in p and "下載失敗" in p for p in problems))
         self.assertTrue(any("HY" in p and "沒更新" in p for p in problems))
+
+
+    def test_falls_back_to_old_cache_when_download_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            _series("2026-10-16").to_frame("baa10y").to_csv(cache / "baa10y.csv")
+            old = dt.datetime(2026, 10, 18).timestamp()
+            import os
+            os.utime(cache / "baa10y.csv", (old, old))
+
+            def down(sid):
+                raise data_sources.FredUnavailable("FRED 回傳網頁而不是資料（Site Maintenance）")
+
+            with mock.patch.object(health, "load_fred", down):
+                raw, problems = health.load_with_health({"baa10y": "BAA10Y"}, {}, cache, 3600,
+                                                        today=dt.date(2026, 10, 22))
+        self.assertIn("baa10y", raw)
+        self.assertEqual(raw["baa10y"].index[-1], pd.Timestamp("2026-10-16"))
+        self.assertTrue(any("改用 2026-10-16 的舊資料" in p and "Maintenance" in p for p in problems))
+
+    def test_fred_maintenance_page_is_reported_clearly(self):
+        page = b"<!doctype html>\n<html><head><title>Site Maintenance | St. Louis Fed</title></head></html>"
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return page
+
+        with mock.patch("urllib.request.urlopen", return_value=Resp()):
+            with self.assertRaises(data_sources.FredUnavailable) as ctx:
+                data_sources.load_fred("BAA10Y")
+        self.assertIn("Site Maintenance", str(ctx.exception))
+
+    def test_signals_compute_without_credit_data(self):
+        idx = pd.bdate_range("2025-01-01", periods=300)
+        raw = {"spx": pd.Series(np.linspace(100, 130, 300), index=idx),
+               "vix_daily": pd.Series(15.0, index=idx), "vix3m_daily": pd.Series(18.0, index=idx)}
+        sig = ds.compute_signals(ds.build_daily_frame(raw))
+        self.assertFalse(sig["w_credit"].any())
+        self.assertEqual(int(sig["warning_inputs"].iloc[-1]), 2)  # only vol and trend are known
 
 
 class SignalLogTests(unittest.TestCase):

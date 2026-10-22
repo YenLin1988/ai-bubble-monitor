@@ -32,7 +32,7 @@ CACHE_DIR = ROOT / "data" / "backtest_cache"
 LOG_PATH = ROOT / "data" / "signal_log.csv"
 FRED_IDS = {"hy": "BAMLH0A0HYM2", "baa10y": "BAA10Y", "t10y2y": "T10Y2Y"}
 YAHOO_IDS = {"spx": "^GSPC", "ndx": "^NDX", "sox": "^SOX", "rut": "^RUT", "vix_daily": "^VIX", "vix3m_daily": "^VIX3M"}
-ESSENTIAL = ("spx", "baa10y")  # without these no signal can be computed
+ESSENTIAL = ("spx",)  # plus the tracked index; FRED credit/curve data is optional (conditions read "unknown")
 SEVERITY = {"warning_up": "warning", "warning_clear": "info", "entry": "info", "trend": "info",
             "exit": "critical", "exit_watch": "warning",
             "position": "warning", "data": "warning"}

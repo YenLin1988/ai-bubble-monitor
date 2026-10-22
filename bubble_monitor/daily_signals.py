@@ -62,6 +62,8 @@ def hy_spread_series(hy: pd.Series, baa10y: pd.Series) -> pd.Series:
     proxy = baa10y.dropna() * HY_FROM_BAA_SLOPE + HY_FROM_BAA_INTERCEPT
     if not len(hy):
         return proxy
+    if not len(proxy):
+        return hy
     return pd.concat([proxy[proxy.index < hy.index.min()], hy]).sort_index()
 
 
@@ -80,7 +82,9 @@ def build_daily_frame(raw: Mapping[str, pd.Series]) -> pd.DataFrame:
 
     return pd.DataFrame({
         "spx": spx,
-        "spread": align(hy_spread_series(raw.get("hy", pd.Series(dtype=float)), raw["baa10y"])),
+        # Credit data is optional: without it the credit conditions are simply "unknown" (not triggered).
+        "spread": align(hy_spread_series(raw.get("hy", pd.Series(dtype=float)),
+                                         raw.get("baa10y", pd.Series(dtype=float)))),
         "rut": align(raw.get("rut"), limit=2),
         "vix": align(raw.get("vix_daily"), limit=2),
         "vix3m": align(raw.get("vix3m_daily"), limit=2),

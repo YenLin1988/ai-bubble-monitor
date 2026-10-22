@@ -36,6 +36,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Last successful downloads, used only as a fallback when a provider is down (e.g. FRED maintenance).
+      - name: Restore last good data
+        uses: actions/cache@v4
+        with:
+          path: data/backtest_cache
+          key: data-cache-${{ github.run_id }}
+          restore-keys: data-cache-
+
+      # Restored files look brand new; age them so every run still tries a fresh download first.
+      - name: Mark restored data as old
+        run: |
+          mkdir -p data/backtest_cache
+          find data/backtest_cache -type f -exec touch -d '2 days ago' {} +
+
       - name: Run daily signal check
         env:
           ALERTS_ENABLED: ${{ secrets.ALERTS_ENABLED }}

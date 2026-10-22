@@ -15,9 +15,23 @@ from .data_sources import cached, load_fred, load_yahoo
 STALE_DAYS = {"yahoo": 5, "fred": 8}
 
 
+def _read_cache(cache_dir: Path | None, key: str) -> pd.Series | None:
+    path = cache_dir / f"{key}.csv" if cache_dir is not None else None
+    if path is None or not path.exists():
+        return None
+    try:
+        return pd.read_csv(path, index_col=0, parse_dates=True).iloc[:, 0]
+    except Exception:
+        return None
+
+
 def load_with_health(fred_ids: Mapping[str, str], yahoo_ids: Mapping[str, str], cache_dir: Path | None,
                      max_age_seconds: float, today: dt.date | None = None) -> tuple[dict[str, pd.Series], list[str]]:
-    """Download every series; return what loaded plus human-readable problems (never raises)."""
+    """Download every series; return what loaded plus human-readable problems (never raises).
+
+    When a download fails but an older cached copy exists, the old copy is used and the
+    problem says how old it is, so one bad day at a data provider does not stop the alerts.
+    """
     today = today or dt.date.today()
     raw: dict[str, pd.Series] = {}
     problems: list[str] = []
@@ -26,8 +40,14 @@ def load_with_health(fred_ids: Mapping[str, str], yahoo_ids: Mapping[str, str], 
     for key, sid, kind, loader in sources:
         try:
             s = cached(cache_dir, key, lambda sid=sid, loader=loader: loader(sid), max_age_seconds=max_age_seconds)
-        except Exception as exc:  # network, parsing, delisted ticker...
-            problems.append(f"{sid}：下載失敗（{type(exc).__name__}: {str(exc)[:120]}）")
+        except Exception as exc:  # network, provider maintenance, delisted ticker...
+            reason = str(exc)[:160]
+            old = _read_cache(cache_dir, key)
+            if old is not None and len(old.dropna()):
+                problems.append(f"{sid}：下載失敗，改用 {old.dropna().index[-1]:%Y-%m-%d} 的舊資料（{reason}）")
+                raw[key] = old.dropna()
+            else:
+                problems.append(f"{sid}：下載失敗，沒有舊資料可用（{reason}）")
             continue
         s = s.dropna()
         if not len(s):

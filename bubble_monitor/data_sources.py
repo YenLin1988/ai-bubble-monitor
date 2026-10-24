@@ -13,14 +13,44 @@ class FredUnavailable(RuntimeError):
     """FRED answered with a web page (e.g. its maintenance page) instead of CSV data."""
 
 
-def load_fred(series_id: str) -> pd.Series:
-    import io
+def _fetch(url: str, timeout: float = 60, attempts: int = 3) -> str:
     import urllib.request
 
-    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        body = resp.read().decode("utf-8", "replace")
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except Exception as exc:  # timeouts, resets; retry with a short pause
+            last = exc
+            if i < attempts - 1:
+                time.sleep(5 * (i + 1))
+    raise last  # type: ignore[misc]
+
+
+def load_fred_api(series_id: str, api_key: str) -> pd.Series:
+    """FRED's official JSON API (api.stlouisfed.org). Needs a free key; used when FRED_API_KEY is set,
+    because the public CSV endpoint times out from some cloud runners."""
+    import json
+    from urllib.parse import urlencode
+
+    query = urlencode({"series_id": series_id, "api_key": api_key, "file_type": "json"})
+    data = json.loads(_fetch(f"https://api.stlouisfed.org/fred/series/observations?{query}"))
+    if "observations" not in data:
+        raise FredUnavailable(f"FRED API 回應異常：{str(data)[:120]}")
+    obs = [(o["date"], o["value"]) for o in data["observations"] if o["value"] not in (".", "")]
+    return pd.Series([float(v) for _, v in obs], index=pd.to_datetime([d for d, _ in obs]))
+
+
+def load_fred(series_id: str) -> pd.Series:
+    import io
+    import os
+
+    api_key = os.environ.get("FRED_API_KEY")
+    if api_key:
+        return load_fred_api(series_id, api_key)
+    body = _fetch(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}")
     if body.lstrip()[:15].lower().startswith(("<!doctype", "<html")):
         title = body.split("<title>", 1)[1].split("<", 1)[0].strip() if "<title>" in body else "unknown page"
         raise FredUnavailable(f"FRED 回傳網頁而不是資料（{title}，可能是網站維護中）")

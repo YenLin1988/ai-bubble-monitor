@@ -65,10 +65,48 @@ class HealthTests(unittest.TestCase):
             def read(self):
                 return page
 
-        with mock.patch("urllib.request.urlopen", return_value=Resp()):
+        with mock.patch("urllib.request.urlopen", return_value=Resp()), mock.patch.dict("os.environ", {"FRED_API_KEY": ""}):
             with self.assertRaises(data_sources.FredUnavailable) as ctx:
                 data_sources.load_fred("BAA10Y")
         self.assertIn("Site Maintenance", str(ctx.exception))
+
+    def test_fred_api_used_when_key_set(self):
+        payload = ('{"observations": [{"date": "2026-10-21", "value": "1.50"}, {"date": "2026-10-22", "value": "."},'
+                   ' {"date": "2026-10-23", "value": "1.46"}]}')
+        seen = {}
+
+        def fake_fetch(url, *a, **k):
+            seen["url"] = url
+            return payload
+
+        with mock.patch.object(data_sources, "_fetch", fake_fetch), mock.patch.dict("os.environ", {"FRED_API_KEY": "abc"}):
+            s = data_sources.load_fred("BAA10Y")
+        self.assertIn("api.stlouisfed.org", seen["url"])
+        self.assertEqual(s.tolist(), [1.50, 1.46])  # "." (missing) is dropped
+        self.assertEqual(s.index[-1], pd.Timestamp("2026-10-23"))
+
+    def test_fetch_retries_then_succeeds(self):
+        calls = {"n": 0}
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"ok"
+
+        def flaky(req, timeout):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise TimeoutError("The read operation timed out")
+            return Resp()
+
+        with mock.patch("urllib.request.urlopen", flaky), mock.patch.object(data_sources.time, "sleep"):
+            self.assertEqual(data_sources._fetch("https://example.test/x"), "ok")
+        self.assertEqual(calls["n"], 3)
 
     def test_signals_compute_without_credit_data(self):
         idx = pd.bdate_range("2025-01-01", periods=300)
